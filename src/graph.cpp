@@ -809,7 +809,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         std::vector<bool>().swap(is_visited);
 
         // ===================================================================================================
-        // ***** ASK ROMAN ABOUT THIS LOOP
+        // ***** ASK R ABOUT THIS LOOP
         for (const auto& component: components) {
 
             std::vector<uint16_t> medians;
