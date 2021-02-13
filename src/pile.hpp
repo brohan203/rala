@@ -117,6 +117,18 @@ public:
         return has_chimeric_hill() || has_chimeric_pit();
     }
 
+    // =========================================================================
+    // Here are two added functions that return the stored results of
+    // break_over_chimeric_hills and break_over_chimeric_pits
+    bool get_break_over_chimeric_hills() const {
+        return break_over_chimeric_hills_val_;
+    }
+
+    bool get_break_over_chimeric_pits() const {
+        return break_over_chimeric_hills_val_;
+    }
+
+
     /*!
      * @brief Locates regions in data_ which ought to be repetitive in the
      * genome and stores them in repeat_hills_
@@ -148,6 +160,27 @@ public:
      */
     std::string to_json() const;
 
+    // =========================================================================
+    // Added in roRala
+
+    std::vector<uint16_t> custom_add_layers(std::vector<uint32_t>& overlap_bounds);
+
+    bool custom_find_valid_region(std::vector<uint16_t>& custom_data_);
+
+    bool custom_shrink(uint32_t begin, uint32_t end, std::vector<uint16_t>& custom_data_);
+
+    void custom_find_median(std::vector<uint16_t> custom_data_);
+
+    void custom_find_chimeric_hills(std::vector<uint16_t> custom_data_);
+
+    void custom_find_chimeric_pits(std::vector<uint16_t> custom_data_);
+
+    std::vector<std::pair<uint32_t, uint32_t>> custom_find_slopes(double q, std::vector<uint16_t> custom_data_);
+
+    bool custom_break_over_chimeric_pits(uint16_t dataset_median, std::vector<uint16_t> custom_data_);
+
+    // =========================================================================
+
     friend std::unique_ptr<Pile> createPile(uint64_t id, uint32_t sequence_length);
 private:
     Pile(uint64_t id, uint32_t sequence_length);
@@ -161,7 +194,13 @@ private:
     uint32_t end_;
     uint16_t p10_;
     uint16_t median_;
-    std::vector<uint16_t> data_;
+    // ***** Added
+    bool break_over_chimeric_hills_val_;
+    bool break_over_chimeric_pits_val_;
+    // ***** Added
+    uint32_t data_size_;
+    // ***** Will remove this
+    // std::vector<uint16_t> data_;
     std::vector<std::pair<uint32_t, uint32_t>> repeat_hills_;
     std::vector<bool> repeat_hill_coverage_;
     std::vector<std::pair<uint32_t, uint32_t>> chimeric_pits_;
