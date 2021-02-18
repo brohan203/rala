@@ -72,25 +72,40 @@ std::vector<uint16_t> Pile::custom_add_layers(std::vector<uint32_t>& overlap_bou
     std::vector<uint16_t> custom_data_(end_);
 
     if (overlap_bounds.empty()) {
-        return custom_data_;
+        return;
     }
 
     std::sort(overlap_bounds.begin(), overlap_bounds.end());
 
-    uint16_t coverage = 0;
+    uint32_t interval_starts[overlap_bounds.size()];
+    uint32_t interval_ends[overlap_bounds.size()];
+
+    // Build interval arrays. Still confused why we are bit-shifting
     uint32_t last_bound = begin_;
+    int i = 0;
     for (const auto& bound: overlap_bounds) {
-        if (coverage > 0) {
-            for (uint32_t i = last_bound; i < (bound >> 1); ++i) {
-                // Add to our custom data INSTEAD of adding to data_[i]
-                custom_data_[i] += coverage;
-            }
-        }
+        interval_starts[i] = last_bound;
         last_bound = (bound >> 1);
-        if (bound & 1) {
-            --coverage;
-        } else {
-            ++coverage;
+        interval_ends[i] = last_bound;
+        ++i;
+    }
+
+    // Add to data_. Haven't applied parallel to this yet
+    // Coverage at position i is number of intervals that begin before i minus number
+    // of intervals that end before i
+    // Double nested for loop for safety, there must be a more efficient way of doing this. Perhaps memoizing at least the num_before part
+    for (i = 0; i < custom_data_.size(); ++i) {
+        int num_before = 0;
+        int num_after = 0;
+        // Definitely don't need to go through entire array every time
+        for (int j = 0; j < (sizeof(interval_starts)/sizeof(interval_starts[0])); ++j) {
+            if (interval_starts[j] < i) {
+                ++num_before;
+            }
+            if (interval_starts[j] > i) {
+                ++num_after;
+            }
+        custom_data_[i] = num_before - num_after;
         }
     }
     // Because we need custom data's size later, save it to data_size_ within this pile
@@ -464,7 +479,7 @@ void Pile::custom_break_over_chimeric_hills(std::vector<uint16_t>& custom_data_)
     std::vector<uint32_t>().swap(chimeric_hill_coverage_);
 
     // ========================
-    // ***** Note: The following code is taken from "shrink" except uses 
+    // ***** Note: The following code is taken from "shrink" except uses
     //       custom_data_ instead of piles_[i]->data_
     if (begin > end) {
         fprintf(stderr, "[rala::Pile::shrink] error: "
@@ -534,7 +549,7 @@ void Pile::custom_break_over_chimeric_pits(uint16_t dataset_median, std::vector<
 
 
     // ========================
-    // ***** Note: The following code is taken from "shrink" except uses 
+    // ***** Note: The following code is taken from "shrink" except uses
     //       custom_data_ instead of piles_[i]->data_
     if (begin > end) {
         fprintf(stderr, "[rala::Pile::shrink] error: "
