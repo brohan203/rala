@@ -248,25 +248,32 @@ void Graph::initialize() {
     // create piles and sequence name hash
     uint64_t num_sequences = 0;
     sparser_->reset();
+    uint32_t begin = 0;
+    uint32_t sequence_length = 0;
     while (true) {
         std::vector<std::unique_ptr<Sequence>> sequences;
         auto status = sparser_->parse_objects(sequences, kChunkSize);
 
         for (uint64_t i = 0; i < sequences.size(); ++i, ++num_sequences) {
             name_to_id_[sequences[i]->name()] = num_sequences;
-            piles_.emplace_back(createPile(num_sequences, sequences[i]->data().size()));
+            piles_.emplace_back(createRoPile(begin, num_sequences, sequences[i]->data().size()));
+            begin = begin + sequences[i]->data().size();
+            sequence_length = sequence_length + sequences[i]->data().size();
         }
+
 
         if (!status) {
             break;
         }
     }
+    printf("Total sequence length = %d\n", sequence_length);
 
     (*logger_)("[rala::Graph::initialize] loaded sequences");
     (*logger_)();
 
     // update piles
     std::vector<std::unique_ptr<Overlap>> overlaps;
+    int totalOverlaps = 0;
     uint64_t num_overlaps = 0;
 
     auto remove_duplicate_overlaps = [&](uint64_t begin, uint64_t end) -> void {
@@ -275,7 +282,15 @@ void Graph::initialize() {
                 continue;
             }
             if (overlaps[i]->a_id() == overlaps[i]->b_id()) {
+                // repeat
+                // TODO: treat tandem and normal repeats differently?
+                // if (overlaps[i]->a_begin() < overlaps[i]->b_end() &&
+                //     overlaps[i]->b_begin() < overlaps[i]->a_end()) {
+                // piles_[overlaps[i]->a_id()]->add_repetitive_region(
+                //     std::min(overlaps[i]->a_begin(), overlaps[i]->b_begin()),
+                //     std::max(overlaps[i]->a_end(), overlaps[i]->b_end()));
                 is_valid_overlap_[num_overlaps + i] = false;
+                //overlaps[i].reset();
                 continue;
             }
             for (uint64_t j = i + 1; j < end; ++j) {
@@ -285,6 +300,8 @@ void Graph::initialize() {
                 if (overlaps[i]->b_id() != overlaps[j]->b_id()) {
                     continue;
                 }
+
+                // TODO: process dual overlaps similar to self overlaps?
                 if (overlaps[i]->length() > overlaps[j]->length()) {
                     is_valid_overlap_[num_overlaps + j] = false;
                 } else {
@@ -295,6 +312,7 @@ void Graph::initialize() {
         }
     };
 
+    // Create a vector for each pile
     std::vector<std::vector<uint32_t>> overlap_bounds(piles_.size());
 
     auto store_overlap_bounds = [&](uint64_t begin, uint64_t end) -> void {
@@ -302,7 +320,7 @@ void Graph::initialize() {
             if (overlaps[i] == nullptr) {
                 continue;
             }
-
+            // ***** Will delete this eventually
             overlap_bounds[overlaps[i]->a_id()].emplace_back(
                 (overlaps[i]->a_begin() + 15) << 1);
             overlap_bounds[overlaps[i]->a_id()].emplace_back(
@@ -311,6 +329,13 @@ void Graph::initialize() {
                 (overlaps[i]->b_begin() + 15) << 1);
             overlap_bounds[overlaps[i]->b_id()].emplace_back(
                 (overlaps[i]->b_end() - 15) << 1 | 1);
+
+            // ***** Add a and b begins and ends to respective vectors
+            // Doesn't matter what order, they'll be sorted later
+            overlap_begins.push_back(overlaps[i]->a_begin());
+            overlap_begins.push_back(overlaps[i]->b_begin());
+            overlap_ends.push_back(overlaps[i]->a_end());
+            overlap_ends.push_back(overlaps[i]->b_end());
         }
     };
 
@@ -318,6 +343,7 @@ void Graph::initialize() {
     while (true) {
         uint64_t l = overlaps.size();
         auto status = oparser_->parse_objects(overlaps, kChunkSize);
+        totalOverlaps = totalOverlaps + overlaps.size();
 
         is_valid_overlap_.resize(is_valid_overlap_.size() + overlaps.size() - l, true);
 
@@ -353,41 +379,13 @@ void Graph::initialize() {
             overlaps.swap(tmp);
         }
 
-        // ================================================================================
-        // ***** ADDED CODE *****
-
-        // CUSTOM DATA IMPLEMENTATION, STILL USING THREAD FUTURES
+        // ***** Will delete this eventually
         std::vector<std::future<void>> thread_futures;
         for (const auto& it: piles_) {
             thread_futures.emplace_back(thread_pool_->submit_task(
                 [&](uint64_t i) -> void {
-
-                    // ***** ORIGINAL CODE IS BELOW
-                    // piles_[i]->add_layers(overlap_bounds[i]);
-                    // std::vector<uint32_t>().swap(overlap_bounds[i]);
-
-                    // ***** MY CODE IS BELOW, in place of code above, combines for loop ~30 lines below
-
-                    // Temp variable. Builds the data_ portion of piles, but instead puts it in tmp_data_
-                    std::vector<uint16_t> tmp_data_ = piles_[i]->custom_add_layers(overlap_bounds[i]);
+                    piles_[i]->add_layers(overlap_bounds[i]);
                     std::vector<uint32_t>().swap(overlap_bounds[i]);
-                    
-                    // ***** Most of section was added from the loop below, but using edited functions that 
-                    //       use tmp_data_ instead of piles->data_
-                    if (piles_[i]->custom_find_valid_region(tmp_data_) == false) {
-                        piles_[i].reset();
-                    } else {
-                        // These three functions are from ~30 lines below
-                        piles_[i]->custom_find_median(tmp_data_);
-                        piles_[i]->custom_find_chimeric_hills(tmp_data_);
-                        piles_[i]->custom_find_chimeric_pits(tmp_data_);
-
-                        // This function is from preprocess and relies on data_[i].
-                        // Instead of re-loading all the tmp_data_ from oparser, I store the result
-                        // (a bool) as a variable and use it later. The dependencies of break_over_chimeric_hills
-                        // are piles_ variables "chimeric_hills" and "chimeric_hill_coverage", satisfied above
-                        piles_[i]->custom_break_over_chimeric_hills(tmp_data_);
-                    }
                 }, it->id()));
         }
         for (const auto& it: thread_futures) {
@@ -398,38 +396,38 @@ void Graph::initialize() {
             break;
         }
     }
-
-    // ================================================================================
+    // ***** Sort both vectors
+    // Now we have all begins and ends sorted
+    std::sort(overlap_begins.begin(), overlap_begins.end());
+    std::sort(overlap_ends.begin(), overlap_ends.end());
+    printf("End of begins = %d\n", overlap_begins.back());
+    printf("End of ends = %d\n", overlap_ends.back());
+    printf("Total overlaps = %d\n", overlap_begins.size());
 
     (*logger_)("[rala::Graph::initialize] loaded overlaps");
     (*logger_)();
 
-    // ================================================================================
-    // ***** COMMENTED OUT THIS FOR LOOP
-    // REMOVED LOOP, moved it up ~30 lines with edited functions that use tmp_data_ instead of piles->data_
-    // std::vector<std::future<void>> thread_futures;
-    // for (const auto& it: piles_) {
-    //     if (it == nullptr) {
-    //         continue;
-    //     }
-    //
-    //     thread_futures.emplace_back(thread_pool_->submit_task(
-    //         [&](uint64_t i) -> void {
-    //             // ***** THIS SECTION OF CODE WAS MOVED ~30 LINES ABOVE
-    //             // if (piles_[i]->find_valid_region() == false) {
-    //             //     piles_[i].reset();
-    //             // } else {
-    //             //     piles_[i]->find_median();
-    //             //     piles_[i]->find_chimeric_hills();
-    //             //     piles_[i]->find_chimeric_pits();
-    //             // }
-    //             // ***** END MOVED CODE
-    //         }, it->id()));
-    // }
-    // for (const auto& it: thread_futures) {
-    //     it.wait();
-    // }
-    // thread_futures.clear();
+    std::vector<std::future<void>> thread_futures;
+    for (const auto& it: piles_) {
+        if (it == nullptr) {
+            continue;
+        }
+
+        thread_futures.emplace_back(thread_pool_->submit_task(
+            [&](uint64_t i) -> void {
+                if (piles_[i]->find_valid_region(overlap_begins, overlap_ends) == false) {
+                    piles_[i].reset();
+                } else {
+                    piles_[i]->find_median(overlap_begins, overlap_ends);
+                    piles_[i]->find_chimeric_hills(overlap_begins, overlap_ends);
+                    piles_[i]->find_chimeric_pits(overlap_begins, overlap_ends);
+                }
+            }, it->id()));
+    }
+    for (const auto& it: thread_futures) {
+        it.wait();
+    }
+    thread_futures.clear();
 
     uint64_t num_prefiltered_sequences = 0;
     for (const auto& it: piles_) {
@@ -733,19 +731,8 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         }
         thread_futures.emplace_back(thread_pool_->submit_task(
             [&](uint64_t i) -> void {
-                // ***** USES DATA_[i]
-                // ***** Notes: break_over_chimeric_hills() depends on chimeric_hills_ and 
-                //       chimeric_hill_coverage_
-                // if (piles_[i]->has_chimeric_hill() &&
-                //     piles_[i]->break_over_chimeric_hills() == false) {
-                //     piles_[i].reset();
-                // }
-
-                // ***** ADDED CODE
-                // Notes: instead of running break_over_chimeric_hills, I run the custom version
-                //        in initialize() and store the bool within piles
                 if (piles_[i]->has_chimeric_hill() &&
-                    piles_[i]->get_break_over_chimeric_hills() == false) {
+                    piles_[i]->break_over_chimeric_hills() == false) {
                     piles_[i].reset();
                 }
             }, it->id()));
@@ -808,15 +795,12 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         std::vector<std::vector<uint64_t>>().swap(connections);
         std::vector<bool>().swap(is_visited);
 
-        // ===================================================================================================
-        // ***** ASK R ABOUT THIS LOOP
         for (const auto& component: components) {
 
             std::vector<uint16_t> medians;
             for (const auto& it: component) {
                 medians.emplace_back(piles_[it]->median());
             }
-            // Doesn't this just sort the first, middle, and last components? Can we do this in initialize instead?
             std::nth_element(medians.begin(), medians.begin() + medians.size() / 2,
                 medians.end());
             uint16_t component_median = medians[medians.size() / 2];
@@ -824,16 +808,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
             for (const auto& it: component) {
                 thread_futures.emplace_back(thread_pool_->submit_task(
                     [&](uint64_t i) -> void {
-
-                        // ***** ORIGINAL CODE
-                        // if (piles_[i]->break_over_chimeric_pits(component_median) == false) {
-                        //     piles_[i].reset();
-                        // }
-
-                        // ***** MY CODE
-                        // Here I had to re-make tmp_data_ in order to get the custom_break_over_chimeric_pits to work.
-
-                        if (piles_[i]->custom_break_over_chimeric_pits(component_median, tmp_data_)) {
+                        if (piles_[i]->break_over_chimeric_pits(component_median, overlap_begins, overlap_ends) == false) {
                             piles_[i].reset();
                         }
                     }, it));
@@ -843,8 +818,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
             }
             thread_futures.clear();
         }
-        // ===================================================================================================
- 
+
         bool is_changed = false;
 
         for (auto& it: overlaps) {
@@ -928,9 +902,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
     (*logger_)("[rala::Graph::preprocess]");
 }
 
-// Preprocess with sensitive overlaps path
-void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
-    const std::string& path) {
+void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const std::string& path) {
 
     if (path.empty()) {
         return;
@@ -988,28 +960,12 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         }
         shrinkToFit(sensitive_overlaps, l);
 
-        // ================================================================================
-        // ***** ADDED CODE *****
-
-        // CUSTOM DATA IMPLEMENTATION, STILL USING THREAD FUTURES
         for (const auto& it: sequence_id_to_id) {
             if (!overlap_bounds[sequence_id_to_id[it.first]].empty()) {
                 thread_futures.emplace_back(thread_pool_->submit_task(
                     [&](uint64_t i) -> void {
-
-                        // ***** ORIGINAL CODE is below
-                        // piles_[i]->add_layers(overlap_bounds[sequence_id_to_id[i]]);
-                        // std::vector<uint32_t>().swap(overlap_bounds[sequence_id_to_id[i]]);
-
-
-                        // ***** MY CODE is below
-
-                        // Temp variable. Builds the data_ portion of piles, but instead puts it in tmp_data_
-                        std::vector<uint16_t> tmp_data_ = piles_[i]->custom_add_layers(overlap_bounds[sequence_id_to_id[i]]);
-
-                        // ***** This section was added from the loop below, but using edited functions that use 
-                        //       tmp_data_ instead of piles->data_
-                        piles_[i]->custom_find_median(tmp_data_);
+                        piles_[i]->add_layers(overlap_bounds[sequence_id_to_id[i]]);
+                        std::vector<uint32_t>().swap(overlap_bounds[sequence_id_to_id[i]]);
                     }, it.first));
             }
         }
@@ -1023,18 +979,16 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         }
     }
 
-    // ***** ORIGINAL CODE, commented out because find_median iterations were moved ~15 lines above
-    // for (const auto& it: sequence_id_to_id) {
-    //     thread_futures.emplace_back(thread_pool_->submit_task(
-    //         [&](uint64_t i) -> void {
-    //             // ***** USES DATA[i]
-    //             piles_[i]->find_median();
-    //         }, it.first));
-    // }
-    // for (const auto& it: thread_futures) {
-    //     it.wait();
-    // }
-    // thread_futures.clear();
+    for (const auto& it: sequence_id_to_id) {
+        thread_futures.emplace_back(thread_pool_->submit_task(
+            [&](uint64_t i) -> void {
+                piles_[i]->find_median(overlap_begins, overlap_ends);
+            }, it.first));
+    }
+    for (const auto& it: thread_futures) {
+        it.wait();
+    }
+    thread_futures.clear();
 
     std::vector<std::vector<uint64_t>> connections(piles_.size());
     for (const auto& it: overlaps) {
@@ -1084,8 +1038,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
         for (const auto& it: component) {
             thread_futures.emplace_back(thread_pool_->submit_task(
                 [&](uint64_t i) -> void {
-
-                    piles_[i]->find_repetitive_hills(component_median);
+                    piles_[i]->find_repetitive_hills(component_median, overlap_begins, overlap_ends);
                 }, it));
         }
         for (const auto& it: thread_futures) {
@@ -2108,7 +2061,8 @@ uint32_t Graph::shrink(uint32_t epsilon) {
     return num_unitigs_created;
 }
 
-void Graph::extract_contigs(std::vector<std::unique_ptr<Sequence>>& dst, bool drop_unassembled_sequences) {
+void Graph::extract_contigs(std::vector<std::unique_ptr<Sequence>>& dst,
+    bool drop_unassembled_sequences) {
 
     create_unitigs();
 

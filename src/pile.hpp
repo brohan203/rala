@@ -17,6 +17,8 @@ class Overlap;
 
 class Pile;
 std::unique_ptr<Pile> createPile(uint64_t id, uint32_t sequence_length);
+std::unique_ptr<Pile> createRoPile(uint32_t begin, uint64_t id, uint32_t sequence_length);
+
 
 class Pile {
 public:
@@ -48,7 +50,12 @@ public:
         return median_;
     };
 
-    void find_median();
+    /*!
+     * @brief Finds height of histogram given overlap begins and ends
+     */
+    uint32_t find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+
+    void find_median(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     const std::vector<uint16_t>& data() const {
         return data_;
@@ -78,12 +85,12 @@ public:
      * if there is no such region (with valid coverage and longer than 1260),
      * false is returned
      */
-    bool find_valid_region();
+    bool find_valid_region(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     /*!
      * @brief Locates chimeric pits (coverage drops) in data_
      */
-    void find_chimeric_pits();
+    void find_chimeric_pits(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     bool has_chimeric_pit() const {
         return !chimeric_pits_.empty();
@@ -92,12 +99,12 @@ public:
     /*!
      * @brief Truncates data_ to longest region without chimeric pits
      */
-    bool break_over_chimeric_pits(uint16_t dataset_median);
+    bool break_over_chimeric_pits(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     /*!
      * @brief Locates possible chimeric hills in data_
      */
-    void find_chimeric_hills();
+    void find_chimeric_hills(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     bool has_chimeric_hill() const {
         return !chimeric_hills_.empty();
@@ -117,23 +124,11 @@ public:
         return has_chimeric_hill() || has_chimeric_pit();
     }
 
-    // =========================================================================
-    // Here are two added functions that return the stored results of
-    // break_over_chimeric_hills and break_over_chimeric_pits
-    bool get_break_over_chimeric_hills() const {
-        return break_over_chimeric_hills_val_;
-    }
-
-    bool get_break_over_chimeric_pits() const {
-        return break_over_chimeric_hills_val_;
-    }
-
-
     /*!
      * @brief Locates regions in data_ which ought to be repetitive in the
      * genome and stores them in repeat_hills_
      */
-    void find_repetitive_hills(uint16_t dataset_median);
+    void find_repetitive_hills(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     bool has_repetitive_hills() const {
         return !repeat_hills_.empty();
@@ -160,47 +155,22 @@ public:
      */
     std::string to_json() const;
 
-    // =========================================================================
-    // Added in roRala
-
-    std::vector<uint16_t> custom_add_layers(std::vector<uint32_t>& overlap_bounds);
-
-    bool custom_find_valid_region(std::vector<uint16_t>& custom_data_);
-
-    bool custom_shrink(uint32_t begin, uint32_t end, std::vector<uint16_t>& custom_data_);
-
-    void custom_find_median(std::vector<uint16_t> custom_data_);
-
-    void custom_find_chimeric_hills(std::vector<uint16_t> custom_data_);
-
-    void custom_find_chimeric_pits(std::vector<uint16_t> custom_data_);
-
-    std::vector<std::pair<uint32_t, uint32_t>> custom_find_slopes(double q, std::vector<uint16_t> custom_data_);
-
-    bool custom_break_over_chimeric_pits(uint16_t dataset_median, std::vector<uint16_t> custom_data_);
-
-    // =========================================================================
-
     friend std::unique_ptr<Pile> createPile(uint64_t id, uint32_t sequence_length);
+    friend std::unique_ptr<Pile> createRoPile(uint32_t begin, uint64_t id, uint32_t sequence_length);
 private:
     Pile(uint64_t id, uint32_t sequence_length);
+    Pile(uint32_t begin, uint64_t id, uint32_t sequence_length);
     Pile(const Pile&) = delete;
     const Pile& operator=(const Pile&) = delete;
 
-    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q);
+    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
     uint64_t id_;
     uint32_t begin_;
     uint32_t end_;
     uint16_t p10_;
     uint16_t median_;
-    // ***** Added
-    bool break_over_chimeric_hills_val_;
-    bool break_over_chimeric_pits_val_;
-    // ***** Added
-    uint32_t data_size_;
-    // ***** Will remove this
-    // std::vector<uint16_t> data_;
+    std::vector<uint16_t> data_;
     std::vector<std::pair<uint32_t, uint32_t>> repeat_hills_;
     std::vector<bool> repeat_hill_coverage_;
     std::vector<std::pair<uint32_t, uint32_t>> chimeric_pits_;
