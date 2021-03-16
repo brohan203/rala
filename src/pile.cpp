@@ -79,6 +79,7 @@ Pile::Pile(uint32_t begin, uint64_t id, uint32_t read_length)
 // NOTES: right now seems to produce numbers way too large, unsure why
 uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
 
+    //printf("Finding num overlaps at %d\n", location);
     uint32_t thisLocation = location + begin_;
 
     // Test print
@@ -99,101 +100,10 @@ uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> 
             break;
         }
         ++i;
-
-        // // If overlap_begins and overlap_ends at i are greater than location, we're done
-        // if( (overlap_begins[i] > thisLocation) && (overlap_ends[i] > thisLocation)) {
-        //     break;
-        // }
-        // else {
-        //     // If overlap_begins and overlap_ends at i are BOTH < location
-        //     // we add one and subtract one (net 0), so just iterate and continue
-        //     if(overlap_begins[i] <= thisLocation && overlap_ends[i] <= thisLocation) {
-        //         ++i;
-        //         continue;
-        //     }
-        //     else {
-        //         // If overlap_begins at i is before location, add one
-        //         if(overlap_begins[i] <= thisLocation) {
-        //             ++height;
-        //             ++i;
-        //             continue;
-        //         }
-        //         // If overlap_ends at i is before location, subtract one
-        //         if(overlap_ends[i] <= thisLocation) {
-        //             --height;
-        //             ++i;
-        //         }
-        //     }
-        // }
     }
-    // Test print
-    // printf("Height at %d is %d\n", location, height);
-    // Finally, return height
     return height;
 }
 
-
-// =============================================================================================
-// WORK IN PROGRESS
-// ***** Added function find_histo_height_batch 
-// Given begin, end, overlap begins and ends pointers, finds the height of a batch
-// Output: a vector of uint32_t's denoting the levels from begin to end
-// std::vec<uint32_t> Pile::find_histo_height_batch(uint32_t hist_begin, uint32_t hist_end, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
-
-//     // Test print
-//     // printf("Finding height at %d\n", location);
-
-//     // i is a counter, height keeps track of height at this spot in the pile-o-gram
-//     uint32_t i = 0;
-//     std::vec<uint32_t> heights = NULL;
-//     uint32_t counter = 0;
-
-//     while(true) {
-//         // If overlap_begins and overlap_ends at i are greater than location, we're done
-//         if( (overlap_begins[i] > end) && (overlap_ends[i] > end)) {
-//             break;
-//         }
-//         else {
-//             // If overlap_begins and overlap_ends at i are BOTH < location
-//             // we add one and subtract one (net 0), so just iterate and continue
-//             if(overlap_begins[i] <= hist_begin && overlap_ends[i] <= hist_begin) {
-//                 ++i;
-//                 continue;
-//             }
-//             else if(overlap_begins[i] >= hist_begin && heights == NULL) {
-//                 heights( (hist_end - hist_begin), i);
-//             }
-//             // Else denotes overlap_begins[i] >= hist_begin
-//             else {
-//                 // If overlap_begins at i is before location, add one
-//                 if(overlap_begins[i] <= location) {
-//                     ++height;
-//                     ++i;
-//                     continue;
-//                 }
-//                 // If overlap_ends at i is before location, subtract one
-//                 if(overlap_ends[i] <= location) {
-//                     --height;
-//                     ++i;
-//                 }
-//             }
-//         }
-//     }
-//     // Finally, return height
-//     return heights;
-// }
-
-// =============================================================================================
-// ***** FUNCTIONS TO EDIT
-// find_slopes                  DONE
-// find_valid_region            DONE
-// shrink (maybe?)
-// break_over_chimeric_pits     DONE
-// break_over_chimeric_hills    DONE
-// find_chimeric_hills          DONE
-// find_chimeric_pits           DONE
-
-// =============================================================================================
 
 // ***** Edited find_slopes
 // Instead of accessing data_[i], we are calculating height using find_histo_height
@@ -416,8 +326,9 @@ void Pile::find_median(const std::vector<uint32_t> &overlap_begins, const std::v
     p10_ = valid_data[valid_data.size() / 10];
 }
 
-void Pile::add_layers(std::vector<uint32_t>& overlap_bounds) {
+void Pile::add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
+    // printf("This begin = %d\n", begin_);
     if (overlap_bounds.empty()) {
         return;
     }
@@ -438,6 +349,11 @@ void Pile::add_layers(std::vector<uint32_t>& overlap_bounds) {
         } else {
             ++coverage;
         }
+    }
+
+    // ***** Print a few heights for validation with find_histo_height
+    for(int i = 400; i < 405; i++) {
+        printf("At %d, data_ = %d, FHH = %d\n", i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
     }
 }
 
