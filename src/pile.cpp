@@ -352,9 +352,9 @@ void Pile::add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_
     }
 
     // ***** Print a few heights for validation with find_histo_height
-    for(int i = 400; i < 405; i++) {
-        printf("At %d, data_ = %d, FHH = %d\n", i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
-    }
+    // for(int i = 400; i < 405; i++) {
+    //     printf("At %d, data_ = %d, FHH = %d\n", i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
+    // }
 }
 
 bool Pile::shrink(uint32_t begin, uint32_t end) {
