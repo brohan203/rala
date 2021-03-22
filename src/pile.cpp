@@ -83,7 +83,7 @@ uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> 
     uint32_t thisLocation = location + begin_;
 
     // Test print
-    // printf("Begin = %d, finding height at %d\n", begin_, thisLocation);
+    printf("Begin = %d, finding height at %d\n", begin_, thisLocation);
 
     // i is a counter, height keeps track of height at this spot in the pile-o-gram
     int i = 0;
@@ -338,7 +338,7 @@ void Pile::add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_
     uint16_t coverage = 0;
     uint32_t last_bound = begin_;
     for (const auto& bound: overlap_bounds) {
-        if (coverage > 0) {
+        if (coverage > 0 ) {
             for (uint32_t i = last_bound; i < (bound >> 1); ++i) {
                 data_[i] += coverage;
             }
@@ -351,10 +351,10 @@ void Pile::add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_
         }
     }
 
-    // ***** Print a few heights for validation with find_histo_height
-    // for(int i = 400; i < 405; i++) {
-    //     printf("At %d, data_ = %d, FHH = %d\n", i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
-    // }
+    for(int i = 400; i < 405; ++i) {
+        printf("At %d, data = %d, FHH = %d\n", 
+        i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
+    }
 }
 
 bool Pile::shrink(uint32_t begin, uint32_t end) {

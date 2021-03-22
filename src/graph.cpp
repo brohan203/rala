@@ -9,6 +9,10 @@
 #include <iostream>
 #include <fstream>
 #include <random>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
 
 #include "sequence.hpp"
 #include "overlap.hpp"
@@ -248,7 +252,6 @@ void Graph::initialize() {
     // create piles and sequence name hash
     uint64_t num_sequences = 0;
     sparser_->reset();
-    uint32_t begin = 0;
     uint32_t sequence_length = 0;
     while (true) {
         std::vector<std::unique_ptr<Sequence>> sequences;
@@ -256,8 +259,7 @@ void Graph::initialize() {
 
         for (uint64_t i = 0; i < sequences.size(); ++i, ++num_sequences) {
             name_to_id_[sequences[i]->name()] = num_sequences;
-            piles_.emplace_back(createRoPile(begin, num_sequences, sequences[i]->data().size()));
-            begin = begin + sequences[i]->data().size();
+            piles_.emplace_back(createRoPile(sequence_length, num_sequences, sequences[i]->data().size()));
             sequence_length = sequence_length + sequences[i]->data().size();
         }
 
@@ -266,6 +268,7 @@ void Graph::initialize() {
             break;
         }
     }
+    printf("Total sequences = %d\n", num_sequences);
     printf("Total sequence length = %d\n", sequence_length);
 
     (*logger_)("[rala::Graph::initialize] loaded sequences");
@@ -273,7 +276,6 @@ void Graph::initialize() {
 
     // update piles
     std::vector<std::unique_ptr<Overlap>> overlaps;
-    int totalOverlaps = 0;
     uint64_t num_overlaps = 0;
 
     auto remove_duplicate_overlaps = [&](uint64_t begin, uint64_t end) -> void {
@@ -314,7 +316,6 @@ void Graph::initialize() {
 
     // Create a vector for each pile
     std::vector<std::vector<uint32_t>> overlap_bounds(piles_.size());
-
     auto store_overlap_bounds = [&](uint64_t begin, uint64_t end) -> void {
         for (uint64_t i = begin; i < end; ++i) {
             if (overlaps[i] == nullptr) {
@@ -326,24 +327,28 @@ void Graph::initialize() {
             overlap_bounds[overlaps[i]->a_id()].emplace_back(
                 (overlaps[i]->a_end() - 15) << 1 | 1);
             overlap_bounds[overlaps[i]->b_id()].emplace_back(
-                (overlaps[i]->b_begin() + 15) << 1);
+               (overlaps[i]->b_begin() + 15) << 1);
             overlap_bounds[overlaps[i]->b_id()].emplace_back(
                 (overlaps[i]->b_end() - 15) << 1 | 1);
 
+            // ***** For both overlaps (a and b), store (their value + the pile's begin position)
+            uint64_t a_begin = piles_[overlaps[i]->a_id()]->begin();
+            uint64_t b_begin = piles_[overlaps[i]->b_id()]->begin();
+
             // ***** Add a and b begins and ends to respective vectors
             // Doesn't matter what order, they'll be sorted later
-            overlap_begins.push_back(overlaps[i]->a_begin());
-            overlap_begins.push_back(overlaps[i]->b_begin());
-            overlap_ends.push_back(overlaps[i]->a_end());
-            overlap_ends.push_back(overlaps[i]->b_end());
+            overlap_begins.push_back(overlaps[i]->a_begin() + a_begin);
+            overlap_begins.push_back(overlaps[i]->b_begin() + b_begin);
+            overlap_ends.push_back(overlaps[i]->a_end() + a_begin);
+            overlap_ends.push_back(overlaps[i]->b_end() + b_begin);
         }
     };
 
+    // This only runs once on sample data (using pacbio 106)
     oparser_->reset();
     while (true) {
         uint64_t l = overlaps.size();
         auto status = oparser_->parse_objects(overlaps, kChunkSize);
-        totalOverlaps = totalOverlaps + overlaps.size();
 
         is_valid_overlap_.resize(is_valid_overlap_.size() + overlaps.size() - l, true);
 
@@ -379,16 +384,19 @@ void Graph::initialize() {
             overlaps.swap(tmp);
         }
 
+        std::sort(overlap_begins.begin(), overlap_begins.end());
+        std::sort(overlap_ends.begin(), overlap_ends.end());
+
         // ***** Will delete this eventually
-        std::vector<std::future<void>> thread_futures;
+        std::vector<std::future<void>> thread_futures2;
         for (const auto& it: piles_) {
-            thread_futures.emplace_back(thread_pool_->submit_task(
+            thread_futures2.emplace_back(thread_pool_->submit_task(
                 [&](uint64_t i) -> void {
-                    piles_[i]->add_layers(overlap_bounds[i]);
+                    piles_[i]->add_layers(overlap_bounds[i], overlap_begins, overlap_ends);
                     std::vector<uint32_t>().swap(overlap_bounds[i]);
                 }, it->id()));
         }
-        for (const auto& it: thread_futures) {
+        for (const auto& it: thread_futures2) {
             it.wait();
         }
 
@@ -396,12 +404,14 @@ void Graph::initialize() {
             break;
         }
     }
+
     // ***** Sort both vectors
     // Now we have all begins and ends sorted
     std::sort(overlap_begins.begin(), overlap_begins.end());
     std::sort(overlap_ends.begin(), overlap_ends.end());
-    printf("End of begins = %d\n", overlap_begins.back());
-    printf("End of ends = %d\n", overlap_ends.back());
+    printf("Sorted overlap_begins and overlap_ends\n");
+    printf("End of overlap_begins = %d\n", overlap_begins.back());
+    printf("End of overlap_ends = %d\n", overlap_ends.back());
     printf("Total overlaps = %d\n", overlap_begins.size());
 
     (*logger_)("[rala::Graph::initialize] loaded overlaps");
@@ -964,7 +974,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const st
             if (!overlap_bounds[sequence_id_to_id[it.first]].empty()) {
                 thread_futures.emplace_back(thread_pool_->submit_task(
                     [&](uint64_t i) -> void {
-                        piles_[i]->add_layers(overlap_bounds[sequence_id_to_id[i]]);
+                        piles_[i]->add_layers(overlap_bounds[sequence_id_to_id[i]], overlap_begins, overlap_ends);
                         std::vector<uint32_t>().swap(overlap_bounds[sequence_id_to_id[i]]);
                     }, it.first));
             }
