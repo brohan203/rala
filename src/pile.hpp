@@ -31,6 +31,13 @@ public:
     /*!
      * @brief Returns begin_ of the valid interval [begin_, end_>
      */
+    uint32_t seq_begin() const {
+        return seq_begin_;
+    }
+
+    /*!
+     * @brief Returns begin_ of the valid interval [begin_, end_>
+     */
     uint32_t begin() const {
         return begin_;
     }
@@ -55,7 +62,7 @@ public:
      */
     uint32_t find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
 
-    void find_median(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    void find_median();
 
     const std::vector<uint16_t>& data() const {
         return data_;
@@ -71,7 +78,7 @@ public:
     /*!
      * @brief Adds overlaps to data_
      */
-    void add_layers(std::vector<uint32_t>& overlap_bounds);
+    void add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     /*!
      * @brief Sets values of data_ outside the interval [begin, end> to zeroes
@@ -85,12 +92,12 @@ public:
      * if there is no such region (with valid coverage and longer than 1260),
      * false is returned
      */
-    bool find_valid_region(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    bool find_valid_region();
 
     /*!
      * @brief Locates chimeric pits (coverage drops) in data_
      */
-    void find_chimeric_pits(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    void find_chimeric_pits();
 
     bool has_chimeric_pit() const {
         return !chimeric_pits_.empty();
@@ -99,12 +106,12 @@ public:
     /*!
      * @brief Truncates data_ to longest region without chimeric pits
      */
-    bool break_over_chimeric_pits(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    bool break_over_chimeric_pits(uint16_t dataset_median);
 
     /*!
      * @brief Locates possible chimeric hills in data_
      */
-    void find_chimeric_hills(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    void find_chimeric_hills();
 
     bool has_chimeric_hill() const {
         return !chimeric_hills_.empty();
@@ -128,7 +135,7 @@ public:
      * @brief Locates regions in data_ which ought to be repetitive in the
      * genome and stores them in repeat_hills_
      */
-    void find_repetitive_hills(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    void find_repetitive_hills(uint16_t dataset_median);
 
     bool has_repetitive_hills() const {
         return !repeat_hills_.empty();
@@ -163,10 +170,11 @@ private:
     Pile(const Pile&) = delete;
     const Pile& operator=(const Pile&) = delete;
 
-    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q);
 
     uint64_t id_;
     uint32_t begin_;
+    uint32_t seq_begin_;
     uint32_t end_;
     uint16_t p10_;
     uint16_t median_;

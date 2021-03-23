@@ -66,9 +66,10 @@ Pile::Pile(uint64_t id, uint32_t read_length)
 }
 
 Pile::Pile(uint32_t begin, uint64_t id, uint32_t read_length)
-        : id_(id), begin_(begin), end_( (begin+read_length) ), p10_(0), median_(0),
-        data_(end_ - begin_, 0), repeat_hills_(), repeat_hill_coverage_(),
-        chimeric_pits_(), chimeric_hills_(), chimeric_hill_coverage_() {
+        : id_(id), begin_(0), seq_begin_(begin), end_( (read_length) ), 
+        p10_(0), median_(0), data_(end_ - begin_, 0), repeat_hills_(), 
+        repeat_hill_coverage_(), chimeric_pits_(), chimeric_hills_(), 
+        chimeric_hill_coverage_() {
 }
 
 // =============================================================================================
@@ -80,10 +81,11 @@ Pile::Pile(uint32_t begin, uint64_t id, uint32_t read_length)
 uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
 
     //printf("Finding num overlaps at %d\n", location);
-    uint32_t thisLocation = location + begin_;
+    
+    uint32_t thisLocation = location + seq_begin_;
 
     // Test print
-    printf("Begin = %d, finding height at %d\n", begin_, thisLocation);
+    // printf("Begin = %d, finding height at %d\n", begin_, thisLocation);
 
     // i is a counter, height keeps track of height at this spot in the pile-o-gram
     int i = 0;
@@ -104,13 +106,10 @@ uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> 
     return height;
 }
 
+// =============================================================================================
 
-// ***** Edited find_slopes
-// Instead of accessing data_[i], we are calculating height using find_histo_height
-std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
 
-    // Test print
-    printf("Running find_slopes with q = %f\n", q);
+std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q) {
 
     std::vector<std::pair<uint32_t, uint32_t>> slope_regions;
 
@@ -127,20 +126,20 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
 
     // find slope regions
     for (int32_t i = 0; i < k; ++i) {
-        subpileAdd(right_subpile, find_histo_height(i, overlap_begins, overlap_ends), i);
+        subpileAdd(right_subpile, data_[i], i);
     }
     for (int32_t i = 0; i < read_length; ++i) {
         if (i > 0) {
-            subpileAdd(left_subpile, find_histo_height(i-1, overlap_begins, overlap_ends), i - 1);
+            subpileAdd(left_subpile, data_[i - 1], i - 1);
         }
         subpileUpdate(left_subpile, i - 1 - k);
 
         if (i < read_length - k) {
-            subpileAdd(right_subpile, find_histo_height(i+k, overlap_begins, overlap_ends), i + k);
+            subpileAdd(right_subpile, data_[i + k], i + k);
         }
         subpileUpdate(right_subpile, i);
 
-        int32_t current_value = find_histo_height(i, overlap_begins, overlap_ends) * q;
+        int32_t current_value = data_[i] * q;
         if (i != 0 && left_subpile.front().second > current_value) {
             if (found_down) {
                 if (i - last_down > 1) {
@@ -196,11 +195,11 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
                     slope_regions[i + 1].second);
 
                 for (uint32_t j = subpile_begin; j < subpile_end + 1; ++j) {
-                    subpileAdd(right_subpile, find_histo_height(j, overlap_begins, overlap_ends), j);
+                    subpileAdd(right_subpile, data_[j], j);
                 }
                 for (uint32_t j = subpile_begin; j < subpile_end; ++j) {
                     subpileUpdate(right_subpile, j);
-                    if (find_histo_height(j, overlap_begins, overlap_ends) * q < right_subpile.front().second) {
+                    if (data_[j] * q < right_subpile.front().second) {
                         if (found_up) {
                             if (j - last_up > 1) {
                                 subregions.emplace_back(first_up, last_up);
@@ -235,7 +234,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
                 uint32_t subpile_end = slope_regions[i].second;
 
                 for (uint32_t j = subpile_begin; j < subpile_end + 1; ++j) {
-                    if (!left_subpile.empty() && find_histo_height(j, overlap_begins, overlap_ends) * q < left_subpile.front().second) {
+                    if (!left_subpile.empty() && data_[j] * q < left_subpile.front().second) {
                         if (found_down) {
                             if (j - last_down > 1) {
                                 subregions.emplace_back(first_down, last_down);
@@ -247,7 +246,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
                         }
                         last_down = j;
                     }
-                    subpileAdd(left_subpile, find_histo_height(j, overlap_begins, overlap_ends), j);
+                    subpileAdd(left_subpile, data_[j], j);
                 }
                 if (found_down) {
                     subregions.emplace_back(first_down, last_down);
@@ -281,20 +280,19 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
 
             uint16_t max_subpile_coverage = 0;
             for (uint32_t j = subpile_begin + 1; j < subpile_end; ++j) {
-                max_subpile_coverage = std::max(max_subpile_coverage, 
-                                     (uint16_t) find_histo_height(j, overlap_begins, overlap_ends));
+                max_subpile_coverage = std::max(max_subpile_coverage, data_[j]);
             }
 
             uint32_t last_valid_point = slope_regions[i].first >> 1;
             for (uint32_t j = slope_regions[i].first >> 1; j <= subpile_begin; ++j) {
-                if (max_subpile_coverage > find_histo_height(j, overlap_begins, overlap_ends) * q) {
+                if (max_subpile_coverage > data_[j] * q) {
                     last_valid_point = j;
                 }
             }
 
             uint32_t first_valid_point = slope_regions[i + 1].second;
             for (uint32_t j = subpile_end; j <= slope_regions[i + 1].second; ++j) {
-                if (max_subpile_coverage > find_histo_height(j, overlap_begins, overlap_ends) * q) {
+                if (max_subpile_coverage > data_[j] * q) {
                     first_valid_point = j;
                     break;
                 }
@@ -308,17 +306,12 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, const std
     return slope_regions;
 }
 
-// ***** Edited find_median
-// Instead of accessing data_, we are calculating height using find_histo_height
-void Pile::find_median(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+void Pile::find_median() {
 
-    // Test print
-    printf("Running find_median with on pile %d\n", id_);
+    std::vector<uint16_t> valid_data(data_.begin() + begin_, data_.begin() + end_);
 
-    std::vector<uint16_t> valid_data(find_histo_height(begin_, overlap_begins, overlap_ends) + begin_, 
-                                     find_histo_height(end_,   overlap_begins, overlap_ends) + end_);
-
-    std::nth_element(valid_data.begin(), valid_data.begin() + valid_data.size() / 2, valid_data.end());
+    std::nth_element(valid_data.begin(), valid_data.begin() + valid_data.size() / 2,
+        valid_data.end());
     median_ = valid_data[valid_data.size() / 2];
 
     std::nth_element(valid_data.begin(), valid_data.begin() + valid_data.size() / 10,
@@ -382,22 +375,15 @@ bool Pile::shrink(uint32_t begin, uint32_t end) {
     return true;
 }
 
-// ***** Edited find_valid_region
-// Instead of accessing data_[i], we are calculating height using find_histo_height
-bool Pile::find_valid_region(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
-
-    // Test print
-    printf("Running find_valid_region on pile %d with begin %d and end %d\n", id_, begin_, end_);
+bool Pile::find_valid_region() {
 
     uint32_t new_begin = 0, new_end = 0, current_begin = 0;
     bool found_begin = false;
     for (uint32_t i = begin_; i < end_; ++i) {
-        // Calculate height here so we dont have to do it twice with if and else if
-        uint32_t this_i = find_histo_height(i, overlap_begins, overlap_ends);
-        if (!found_begin && this_i >= 4) {
+        if (!found_begin && data_[i] >= 4) {
             current_begin = i;
             found_begin = true;
-        } else if (found_begin && this_i < 4) {
+        } else if (found_begin && data_[i] < 4) {
             if (i - current_begin > new_end - new_begin) {
                 new_begin = current_begin;
                 new_end = i;
@@ -415,14 +401,9 @@ bool Pile::find_valid_region(const std::vector<uint32_t> &overlap_begins, const 
     return shrink(new_begin, new_end);
 }
 
-// ***** Edited find_chimeric_pits
-// Calls find_slopes, so we must pass it overlap_begins and overlap_ends
-void Pile::find_chimeric_pits(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+void Pile::find_chimeric_pits() {
 
-    // Test pring
-    printf("Running find_chimeric_pits on pile %d\n", id_);
-
-    auto slope_regions = find_slopes(1.82, overlap_begins, overlap_ends);
+    auto slope_regions = find_slopes(1.82);
     if (slope_regions.empty()) {
         return;
     }
@@ -436,11 +417,11 @@ void Pile::find_chimeric_pits(const std::vector<uint32_t> &overlap_begins, const
     intervalMerge(chimeric_pits_);
 }
 
-bool Pile::break_over_chimeric_pits(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+bool Pile::break_over_chimeric_pits(uint16_t dataset_median) {
 
     auto is_chimeric_pit = [&](uint32_t begin, uint32_t end) -> bool {
         for (uint32_t i = begin; i <= end; ++i) {
-            if (find_histo_height(i, overlap_begins, overlap_ends) * 1.84 <= dataset_median) {
+            if (data_[i] * 1.84 <= dataset_median) {
                 return true;
             }
         }
@@ -474,10 +455,9 @@ bool Pile::break_over_chimeric_pits(uint16_t dataset_median, const std::vector<u
     return shrink(begin, end);
 }
 
-void Pile::find_chimeric_hills(const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+void Pile::find_chimeric_hills() {
 
-    printf("Running find_chimeric_hills on pile %d\n", id_);
-    auto slope_regions = find_slopes(1.3, overlap_begins, overlap_ends);
+    auto slope_regions = find_slopes(1.3);
     if (slope_regions.empty()) {
         return;
     }
@@ -492,11 +472,11 @@ void Pile::find_chimeric_hills(const std::vector<uint32_t> &overlap_begins, cons
             return false;
         }
 
-        uint32_t peak_value = 1.3 * std::max(find_histo_height(begin.second, overlap_begins, overlap_ends),
-            find_histo_height(end.first >> 1, overlap_begins, overlap_ends));
+        uint32_t peak_value = 1.3 * std::max(data_[begin.second],
+            data_[end.first >> 1]);
 
         for (uint32_t i = begin.second + 1; i < (end.first >> 1); ++i) {
-            if (find_histo_height(i, overlap_begins, overlap_ends) > peak_value) {
+            if (data_[i] > peak_value) {
                 return true;
             }
         }
@@ -571,14 +551,14 @@ bool Pile::break_over_chimeric_hills() {
     return shrink(begin, end);
 }
 
-void Pile::find_repetitive_hills(uint16_t dataset_median, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+void Pile::find_repetitive_hills(uint16_t dataset_median) {
 
     // TODO: remove?
     if (median_ > 1.42 * dataset_median) {
         dataset_median = std::max(dataset_median, p10_);
     }
 
-    auto slope_regions = find_slopes(1.42, overlap_begins, overlap_ends);
+    auto slope_regions = find_slopes(1.42);
     if (slope_regions.empty()) {
         return;
     }
@@ -592,17 +572,15 @@ void Pile::find_repetitive_hills(uint16_t dataset_median, const std::vector<uint
             return false;
         }
         bool found_peak = false;
-        uint32_t peak_value = 1.42 * std::max(find_histo_height(begin.second,   overlap_begins, overlap_ends), 
-                                              find_histo_height(end.first >> 1, overlap_begins, overlap_ends));
+        uint32_t peak_value = 1.42 * std::max(data_[begin.second], data_[end.first >> 1]);
         uint32_t valid_points = 0;
         uint32_t min_value = dataset_median * 1.42;
 
         for (uint32_t i = begin.second + 1; i < (end.first >> 1); ++i) {
-            uint32_t this_i = find_histo_height(i, overlap_begins, overlap_ends);
-            if (this_i > min_value) {
+            if (data_[i] > min_value) {
                 ++valid_points;
             }
-            if (this_i > peak_value) {
+            if (data_[i] > peak_value) {
                 found_peak = true;
             }
         }

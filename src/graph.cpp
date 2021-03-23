@@ -331,15 +331,16 @@ void Graph::initialize() {
             overlap_bounds[overlaps[i]->b_id()].emplace_back(
                 (overlaps[i]->b_end() - 15) << 1 | 1);
 
+            // **** UPDATE 22/3/21, IT WORKSSS!!!!
             // ***** For both overlaps (a and b), store (their value + the pile's begin position)
-            uint64_t a_begin = piles_[overlaps[i]->a_id()]->begin();
-            uint64_t b_begin = piles_[overlaps[i]->b_id()]->begin();
+            uint64_t a_begin = piles_[overlaps[i]->a_id()]->seq_begin();
+            uint64_t b_begin = piles_[overlaps[i]->b_id()]->seq_begin();
 
             // ***** Add a and b begins and ends to respective vectors
             // Doesn't matter what order, they'll be sorted later
-            overlap_begins.push_back(overlaps[i]->a_begin() + a_begin);
+            overlap_begins.push_back((overlaps[i]->a_begin() + 15) + a_begin);
             overlap_begins.push_back(overlaps[i]->b_begin() + b_begin);
-            overlap_ends.push_back(overlaps[i]->a_end() + a_begin);
+            overlap_ends.push_back((overlaps[i]->a_end()) + a_begin);
             overlap_ends.push_back(overlaps[i]->b_end() + b_begin);
         }
     };
@@ -425,12 +426,12 @@ void Graph::initialize() {
 
         thread_futures.emplace_back(thread_pool_->submit_task(
             [&](uint64_t i) -> void {
-                if (piles_[i]->find_valid_region(overlap_begins, overlap_ends) == false) {
+                if (piles_[i]->find_valid_region() == false) {
                     piles_[i].reset();
                 } else {
-                    piles_[i]->find_median(overlap_begins, overlap_ends);
-                    piles_[i]->find_chimeric_hills(overlap_begins, overlap_ends);
-                    piles_[i]->find_chimeric_pits(overlap_begins, overlap_ends);
+                    piles_[i]->find_median();
+                    piles_[i]->find_chimeric_hills();
+                    piles_[i]->find_chimeric_pits();
                 }
             }, it->id()));
     }
@@ -818,7 +819,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps,
             for (const auto& it: component) {
                 thread_futures.emplace_back(thread_pool_->submit_task(
                     [&](uint64_t i) -> void {
-                        if (piles_[i]->break_over_chimeric_pits(component_median, overlap_begins, overlap_ends) == false) {
+                        if (piles_[i]->break_over_chimeric_pits(component_median) == false) {
                             piles_[i].reset();
                         }
                     }, it));
@@ -992,7 +993,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const st
     for (const auto& it: sequence_id_to_id) {
         thread_futures.emplace_back(thread_pool_->submit_task(
             [&](uint64_t i) -> void {
-                piles_[i]->find_median(overlap_begins, overlap_ends);
+                piles_[i]->find_median();
             }, it.first));
     }
     for (const auto& it: thread_futures) {
@@ -1048,7 +1049,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const st
         for (const auto& it: component) {
             thread_futures.emplace_back(thread_pool_->submit_task(
                 [&](uint64_t i) -> void {
-                    piles_[i]->find_repetitive_hills(component_median, overlap_begins, overlap_ends);
+                    piles_[i]->find_repetitive_hills(component_median);
                 }, it));
         }
         for (const auto& it: thread_futures) {

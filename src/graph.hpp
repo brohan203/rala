@@ -167,7 +167,7 @@ private:
     std::unique_ptr<bioparser::Parser<Overlap>> oparser_;
     std::vector<bool> is_valid_overlap_;
 
-    // ***** All the overlaps, sorted
+    // All the overlaps, sorted
     std::vector<uint32_t> overlap_begins;
     std::vector<uint32_t> overlap_ends;
 
