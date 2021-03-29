@@ -57,10 +57,18 @@ public:
         return median_;
     };
 
+    // Binary search to find overlaps that start before or overlaps that end before position
+    uint32_t binary_search(std::vector<uint32_t> &overlaps, uint32_t left, uint32_t right, const uint32_t location);
+
     /*!
-     * @brief Finds height of histogram given overlap begins and ends
+     * @brief Finds height of histogram given overlap begins and ends as vectors of uint32_t
      */
-    uint32_t find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends);
+    uint32_t find_histo_height(uint32_t location, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
+
+    /*!
+     * @brief Finds height of histogram given overlap begins and ends as vectors of pair<uint32_t, uint32_t>
+     */
+    uint32_t new_find_histo_height(uint32_t location, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_begins, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_ends);
 
     void find_median();
 
@@ -92,7 +100,7 @@ public:
      * if there is no such region (with valid coverage and longer than 1260),
      * false is returned
      */
-    bool find_valid_region();
+    bool find_valid_region(std::vector<uint32_t> &new_overlap_begins, std::vector<uint32_t> &new_overlap_ends);
 
     /*!
      * @brief Locates chimeric pits (coverage drops) in data_
@@ -174,8 +182,9 @@ private:
 
     uint64_t id_;
     uint32_t begin_;
-    uint32_t seq_begin_;
     uint32_t end_;
+    uint32_t seq_begin_;
+    uint32_t seq_end_;
     uint16_t p10_;
     uint16_t median_;
     std::vector<uint16_t> data_;

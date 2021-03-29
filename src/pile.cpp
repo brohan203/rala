@@ -66,10 +66,10 @@ Pile::Pile(uint64_t id, uint32_t read_length)
 }
 
 Pile::Pile(uint32_t begin, uint64_t id, uint32_t read_length)
-        : id_(id), begin_(0), seq_begin_(begin), end_( (read_length) ), 
-        p10_(0), median_(0), data_(end_ - begin_, 0), repeat_hills_(), 
-        repeat_hill_coverage_(), chimeric_pits_(), chimeric_hills_(), 
-        chimeric_hill_coverage_() {
+        : id_(id), begin_(0), end_( (read_length) ), seq_begin_(begin),
+        seq_end_(begin+read_length), p10_(0), median_(0), data_(end_ - begin_, 0),
+        repeat_hills_(), repeat_hill_coverage_(), chimeric_pits_(), 
+        chimeric_hills_(), chimeric_hill_coverage_() {
 }
 
 // =============================================================================================
@@ -77,32 +77,91 @@ Pile::Pile(uint32_t begin, uint64_t id, uint32_t read_length)
 // Given place, overlap begins and ends pointers, finds the height of a place on histogram
 // Output: a uint32_t denoting the level
 
+// Helper function for binary search through array
+uint32_t Pile::binary_search(std::vector<uint32_t> &overlaps, uint32_t left, uint32_t right, const uint32_t location) {
+    // If we're in a valid segment
+    if(right >= 1) {
+        // Find middle
+        uint32_t middle = (left + (right - left) / 2);
+
+        // There are four possible cases:
+        //      1. overlaps[middle] < location -> recurse from middle to right
+        //      2. overlaps[middle] > location -> recurse from left to middle
+        //      3. overlaps[middle] = location -> iterate until overlaps[middle+1] > location, then return
+        //      4. overlaps[middle] > location and overlaps[middle+1] < location -> return
+        // If middle element is < location and middle+1 is > location, we're between them so return middle
+        if( left == right ||
+          ( overlaps[middle] < location && overlaps[middle+1] > location ) ) {
+            return middle;
+        }
+        // If middle element is location, keep iterating so we are beyond all 
+        if( overlaps[middle] == location) {
+            // Keep iterating middle until the next element is > location
+            while(true) {
+                ++middle;
+                if(overlaps[middle] > location ||
+                   middle == overlaps.size()-1) {
+                    break;
+                }
+            }
+            return middle-1;
+        }
+
+        // If desired position < middle, iterate through first half of array
+        if(overlaps[middle] > location) {
+            return(binary_search(overlaps, left, middle-1, location));
+        }
+        // If desired position > middle, iterate through second half of array
+        else{
+            return(binary_search(overlaps, middle+1, right, location));
+        }
+    }
+    return -1;
+}
+
 // NOTES: right now seems to produce numbers way too large, unsure why
-uint32_t Pile::find_histo_height(uint32_t location, const std::vector<uint32_t> &overlap_begins, const std::vector<uint32_t> &overlap_ends) {
+uint32_t Pile::find_histo_height(uint32_t location, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
+    
+    const uint32_t thisLocation = location + seq_begin_;
+    uint32_t begins = binary_search(overlap_begins, 0, overlap_begins.size()-1, thisLocation);
+    uint32_t ends = binary_search(overlap_ends, 0, overlap_ends.size()-1, thisLocation);
+
+    return ( begins - ends );
+}
+
+// =============================================================================================
+// EXPERIMENTAL
+// ***** Added function new_find_histo_height
+// Given place, overlap begins and ends pointers, finds the height of a position on histogram
+// Output: a uint32_t denoting the level
+uint32_t Pile::new_find_histo_height(uint32_t location, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_begins, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_ends) {
 
     //printf("Finding num overlaps at %d\n", location);
     
     uint32_t thisLocation = location + seq_begin_;
 
     // Test print
-    // printf("Begin = %d, finding height at %d\n", begin_, thisLocation);
+    // printf("Begin = %d, finding height at %d\n", seq_begin_, thisLocation);
 
     // i is a counter, height keeps track of height at this spot in the pile-o-gram
     int i = 0;
     int height = 0;
 
     while(true) {
-        if(overlap_begins[i] <= thisLocation) {
-            ++height;
-        }
-        if(overlap_ends[i] <= thisLocation) {
-            --height;
-        }
-        if(overlap_begins[i] > thisLocation && overlap_ends[i] > thisLocation) {
+        if(new_overlap_begins[i].first > thisLocation && new_overlap_ends[i].first > thisLocation) {
             break;
+        }
+        else {
+            if(new_overlap_begins[i].first <= thisLocation) {
+                height = height + new_overlap_begins[i].second;
+            }
+            if(new_overlap_ends[i].first <= thisLocation) {
+                height = height - new_overlap_ends[i].second;
+            }
         }
         ++i;
     }
+    // printf("New FHH used %d iterations\n", i);
     return height;
 }
 
@@ -344,12 +403,13 @@ void Pile::add_layers(std::vector<uint32_t>& overlap_bounds, std::vector<uint32_
         }
     }
 
-    for(int i = 400; i < 405; ++i) {
-        printf("At %d, data = %d, FHH = %d\n", 
-        i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
-    }
+    // for(int i = 400; i < 405; ++i) {
+    //     printf("At %d, data = %d, FHH = %d\n", 
+    //     i+begin_, data_[i], find_histo_height(i, overlap_begins, overlap_ends));
+    // }
 }
 
+// Getting rid of shrink
 bool Pile::shrink(uint32_t begin, uint32_t end) {
 
     if (begin > end) {
@@ -375,15 +435,25 @@ bool Pile::shrink(uint32_t begin, uint32_t end) {
     return true;
 }
 
-bool Pile::find_valid_region() {
+/*
+Starting CUDA implementation
+Notes:  Depends on 
+            -- data_ (or overlap begins/ends)
+            -- begin_ and end_
+        Must return new_begin and new_end and set this particular piles' begin_ and end_to that
+*/
+bool Pile::find_valid_region(std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
+    printf("find_valid_region from %d to %d\n", seq_begin_, seq_end_);
     uint32_t new_begin = 0, new_end = 0, current_begin = 0;
     bool found_begin = false;
     for (uint32_t i = begin_; i < end_; ++i) {
-        if (!found_begin && data_[i] >= 4) {
+        // Using height function here. Saving as variable because we use it twice
+        uint32_t this_height = find_histo_height(i, overlap_begins, overlap_ends);
+        if (!found_begin && this_height >= 4) {
             current_begin = i;
             found_begin = true;
-        } else if (found_begin && data_[i] < 4) {
+        } else if (found_begin && this_height < 4) {
             if (i - current_begin > new_end - new_begin) {
                 new_begin = current_begin;
                 new_end = i;
@@ -398,6 +468,7 @@ bool Pile::find_valid_region() {
         }
     }
 
+    // Will eventually copy shrink code here once we're rid of data_ element
     return shrink(new_begin, new_end);
 }
 
@@ -715,5 +786,4 @@ std::string Pile::to_json() const {
 
     return ss.str();
 }
-
 }
