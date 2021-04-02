@@ -70,7 +70,7 @@ public:
      */
     uint32_t new_find_histo_height(uint32_t location, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_begins, const std::vector<std::pair<uint32_t, uint32_t>> &new_overlap_ends);
 
-    void find_median();
+    void find_median(std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     const std::vector<uint16_t>& data() const {
         return data_;
@@ -105,7 +105,7 @@ public:
     /*!
      * @brief Locates chimeric pits (coverage drops) in data_
      */
-    void find_chimeric_pits();
+    void find_chimeric_pits(std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     bool has_chimeric_pit() const {
         return !chimeric_pits_.empty();
@@ -119,7 +119,7 @@ public:
     /*!
      * @brief Locates possible chimeric hills in data_
      */
-    void find_chimeric_hills();
+    void find_chimeric_hills(std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     bool has_chimeric_hill() const {
         return !chimeric_hills_.empty();
@@ -143,7 +143,7 @@ public:
      * @brief Locates regions in data_ which ought to be repetitive in the
      * genome and stores them in repeat_hills_
      */
-    void find_repetitive_hills(uint16_t dataset_median);
+    void find_repetitive_hills(uint16_t dataset_median, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     bool has_repetitive_hills() const {
         return !repeat_hills_.empty();
@@ -178,7 +178,7 @@ private:
     Pile(const Pile&) = delete;
     const Pile& operator=(const Pile&) = delete;
 
-    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q);
+    std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
     uint64_t id_;
     uint32_t begin_;

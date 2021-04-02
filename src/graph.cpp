@@ -49,27 +49,28 @@
 // CUDA GLOBAL AND DEVICE FUNCTIONS
 
 /*
-// Implementation of binary search
-__device__ uint32_t binary_search(uint32_t *overlaps, int left, int right, int location) {
-    if(right >= 1) {
-        int middle = left + (right - 1) / 2;
+// Implementation of upper_bound using binary search. Basically copied from C++ Standard Library
+__device__ uint32_t upper_bound(std::vector<uint32_t> &overlaps, uint32_t first, uint32_t last, const uint32_t location) {
+    uint32_t it, count, step;
+    count = last - first;
 
-        if(overlaps[middle] == location) {
-            return middle;
+    while(count > 0) {
+        it = first;
+        step = count / 2;
+        it = it + step;
+        if(!(location < overlaps[it])) {
+            first = ++it;
+            count -= step + 1;
         }
-
-        if(arr[middle] > location) {
-            return(binary_search(overlaps, left, middle-1, location));
-        }
-        else{
-            return(binary_search(overlaps, middle+1, right, location));
+        else {
+            count = step;
         }
     }
-    return -1;
+    return first - 1;
 }
 
 
-__device__ uint32_t find_histo_height(uint32_t location, uint32_t *overlap_begins, uint32_t *overlap_ends) {
+__device__ uint32_t cuda_find_histo_height(uint32_t location, uint32_t *overlap_begins, uint32_t *overlap_ends) {
 
     uint32_t thisLocation = location + seq_begin_;
 
@@ -79,7 +80,7 @@ __device__ uint32_t find_histo_height(uint32_t location, uint32_t *overlap_begin
 }
 
 
-__global__ void cuda_find_valid_region(uint32_t *overlap_begins,            // Overlap begins and ends
+__global__ void cuda_find_valid_region(uint32_t *overlap_begins,        // Overlap begins and ends
                                        uint32_t *overlap_ends, 
                                        uint32_t *pile_begins,           // Specific begins and ends of the piles
                                        uint32_t *pile_ends, 
@@ -94,7 +95,7 @@ __global__ void cuda_find_valid_region(uint32_t *overlap_begins,            // O
     bool found_begin = false;
     for (uint32_t i = pile_begins[gid]; i < pile_ends[gid]; ++i) {
         // Using height function here. Saving as variable because we use it twice
-        uint32_t this_height = find_histo_height(i, new_overlap_begins, new_overlap_ends);
+        uint32_t this_height = cuda_find_histo_height(i, new_overlap_begins, new_overlap_ends);
         if (!found_begin && this_height >= 4) {
             current_begin = i;
             found_begin = true;
@@ -126,6 +127,18 @@ __global__ void cuda_find_valid_region(uint32_t *overlap_begins,            // O
         valid_regions[gid] =  true;
     }
 }
+
+__global__ void find_medians(int *overlap_begins, int *overlap_ends, int *begins, int *ends) {
+
+    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    int mean = 0;
+
+    for(int i = begins[gid]; i < ends[gid]; ++i) {
+        mean = mean + cuda_find_histo_height(i, overlap_begins, overlap_ends);
+    }
+
+    mean = mean / (end_ - begin_);
+
 */
 
 // END CUDA STUFF
@@ -376,8 +389,8 @@ void Graph::initialize() {
             break;
         }
     }
-    printf("Total sequences = %d\n", num_sequences);
-    printf("Total sequence length = %d\n", sequence_length);
+    // sequences = %d\n", num_sequences);
+    // printf("Total sequence length = %d\n", sequence_length);
 
     (*logger_)("[rala::Graph::initialize] loaded sequences");
     (*logger_)();
@@ -445,9 +458,9 @@ void Graph::initialize() {
             uint64_t b_begin = piles_[overlaps[i]->b_id()]->seq_begin();
             // ***** Add a and b begins and ends to respective vectors
             // Doesn't matter what order, they'll be sorted later
-            overlap_begins.push_back((overlaps[i]->a_begin() + 15) + a_begin);
+            overlap_begins.push_back(overlaps[i]->a_begin() + a_begin);
             overlap_begins.push_back(overlaps[i]->b_begin() + b_begin);
-            overlap_ends.push_back((overlaps[i]->a_end()) + a_begin);
+            overlap_ends.push_back(overlaps[i]->a_end() + a_begin);
             overlap_ends.push_back(overlaps[i]->b_end() + b_begin);
         }
     };
@@ -515,38 +528,7 @@ void Graph::initialize() {
     std::sort(overlap_begins.begin(), overlap_begins.end());
     std::sort(overlap_ends.begin(), overlap_ends.end());
 
-    /*
-    // ***** ADDED MARCH 25 2021
-    // Experimental overlap begins/ends are vectors containing all overlaps, but in a vector of pairs 
-    // First element is position, second element is frequency
-    std::vector<ovlp> new_overlap_begins;
-    std::vector<ovlp> new_overlap_ends;
-
-    // Make the first element
-    new_overlap_begins.emplace_back(ovlp( ovlp_position(overlap_begins[0]), ovlp_frequency(1));
-    new_overlap_ends.emplace_back(std::pair<uint32_t, uint32_t>(overlap_ends[0], 1));
-
-    // Iterate through overlap_begins and overlap_ends adding to 
-    for(int i = 1; i < overlap_begins.size(); ++i) {
-        // For overlap_begins
-        if(new_overlap_begins.back().first == overlap_begins[i]) {
-            ++new_overlap_begins.back().second;
-        }
-        else {
-            new_overlap_begins.emplace_back(std::pair<uint32_t, uint32_t>(overlap_begins[i], 1));
-        }
-
-        // For overlap_ends
-        if(new_overlap_ends.back().first == overlap_ends[i]) {
-            ++new_overlap_ends.back().second;
-        }
-        else {
-            new_overlap_ends.emplace_back(std::pair<uint32_t, uint32_t>(overlap_ends[i], 1));
-        }
-    }
-    */
-
-
+    
     printf("Sorted overlap_begins and overlap_ends\n");
     printf("End of overlap_begins = %d\n", overlap_begins.back());
     printf("End of overlap_ends = %d\n", overlap_ends.back());
@@ -559,24 +541,26 @@ void Graph::initialize() {
     printf("\nFirst elements of first pile:\n");
     for(int a = 0; a < 30; a++) {
         printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[0]->data()[a]
-                                                        ,piles_[0]->find_histo_height(a, overlap_begins, overlap_ends));
+                                                           ,piles_[0]->find_histo_height(a, overlap_begins, overlap_ends));
     }
     printf("\nSome elements of a middle pile:\n");
     for(int a = 5000; a < 5030; a++) {
-        printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[7537]->data()[a]
-                                                        ,piles_[7537]->find_histo_height(a, overlap_begins, overlap_ends));
+        printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[129]->data()[a]
+                                                           ,piles_[129]->find_histo_height(a, overlap_begins, overlap_ends));
     }
     printf("\nLast elements of last pile:\n");
     for(int a = 15030; a < piles_[18073]->data().size(); a++) {
         printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[18073]->data()[a]
-                                                        ,piles_[18073]->find_histo_height(a, overlap_begins, overlap_ends));
+                                                           ,piles_[18073]->find_histo_height(a, overlap_begins, overlap_ends));
     }
-    printf("\n\nDONE WITH PRINT TEST, WAITING 5 SECONDS\n");
+
+    printf("\n\nDONE WITH PRINT, WAITING 3 SECONDS\n");
     #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-    Sleep(5 * MILLISECOND);
+    Sleep(3 * MILLISECOND);
     #else
-    usleep(5 * MICROSECOND);
+    usleep(3 * MICROSECOND);
     #endif
+
 
     /* For each pile
             if(find_valid_region) -> reset
@@ -592,6 +576,8 @@ void Graph::initialize() {
     // ***** Starting Cuda implementaton
     // Device initiation
     int dev = findCudaDevice(argc, (const char **)argv);
+
+    // LOAD OVERLAP_BEGINS AND OVERLAP_ENDS INTO GPU
 
     // Host memory allocation (all temp)
     uint32_t *h_pile_begins     = new uint32_t[piles_.size()];
@@ -610,7 +596,7 @@ void Graph::initialize() {
     cudaError_t status;
 
     // Allocate device memory. We have 5 mallocs here.
-    ovlp *d_overlap_begins, *d_overlap_ends;
+    uint32_t *d_overlap_begins, *d_overlap_ends;
     uint32_t *d_pile_begins, *d_new_pile_begins, *d_pile_ends, *d_new_pile_ends;
     bool *d_valid_regions;
 
@@ -697,8 +683,8 @@ void Graph::initialize() {
     cudaDeviceSynchronize( );
 
     // Free up memory on GPU, but keep our overlap_begins and overlap_ends
-    status = cudaFree( d_pile_begins );
-    status = cudaFree( d_pile_ends );
+    // status = cudaFree( d_pile_begins );
+    // status = cudaFree( d_pile_ends );
     status = cudaFree( d_new_pile_begins );
     status = cudaFree( d_new_pile_ends );
     status = cudaFree( d_valid_regions );
@@ -710,7 +696,7 @@ void Graph::initialize() {
             piles_[i].reset();
         }
         else {
-            // Otherwise new pile begins and ends
+            // Otherwise set new begins and ends
             piles_[i].begin_ = h_new_pile_begins[i];
             piles_[i].ends_ = h_new_pile_ends[i];
         }
@@ -729,9 +715,9 @@ void Graph::initialize() {
                 if (piles_[i]->find_valid_region(overlap_begins, overlap_ends) == false) {
                     piles_[i].reset();
                 } else {
-                    piles_[i]->find_median();
-                    piles_[i]->find_chimeric_hills();
-                    piles_[i]->find_chimeric_pits();
+                    piles_[i]->find_median(overlap_begins, overlap_ends);
+                    piles_[i]->find_chimeric_hills(overlap_begins, overlap_ends);
+                    piles_[i]->find_chimeric_pits(overlap_begins, overlap_ends);
                 }
             }, it->id()));
     }
@@ -1293,7 +1279,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const st
     for (const auto& it: sequence_id_to_id) {
         thread_futures.emplace_back(thread_pool_->submit_task(
             [&](uint64_t i) -> void {
-                piles_[i]->find_median();
+                piles_[i]->find_median(overlap_begins, overlap_ends);
             }, it.first));
     }
     for (const auto& it: thread_futures) {
@@ -1349,7 +1335,7 @@ void Graph::preprocess(std::vector<std::unique_ptr<Overlap>>& overlaps, const st
         for (const auto& it: component) {
             thread_futures.emplace_back(thread_pool_->submit_task(
                 [&](uint64_t i) -> void {
-                    piles_[i]->find_repetitive_hills(component_median);
+                    piles_[i]->find_repetitive_hills(component_median, overlap_begins, overlap_ends);
                 }, it));
         }
         for (const auto& it: thread_futures) {
