@@ -84,8 +84,6 @@ __global__ void cuda_find_valid_region(uint32_t *overlap_begins,        // Overl
                                        uint32_t *overlap_ends, 
                                        uint32_t *pile_begins,           // Specific begins and ends of the piles
                                        uint32_t *pile_ends, 
-                                       uint32_t *new_pile_begins,       // New pile begins and ends to return
-                                       uint32_t *new_pile_ends, 
                                        bool *valid_regions) {           // Bool vector for resetting piles
 
     // Figure out where we are
@@ -117,12 +115,11 @@ __global__ void cuda_find_valid_region(uint32_t *overlap_begins,        // Overl
     // This part below is the shrink function
     if (end - begin < 1260) {
         valid_regions[gid] = false;
-        return;
     }
 
     else {
-        new_pile_begins[gid] = new_begin;
-        new_pile_ends[gid] = new_end;
+        pile_begins[gid] = new_begin;
+        pile_ends[gid] = new_end;
 
         valid_regions[gid] =  true;
     }
@@ -138,6 +135,7 @@ __global__ void find_medians(int *overlap_begins, int *overlap_ends, int *begins
     }
 
     mean = mean / (end_ - begin_);
+}
 
 */
 
@@ -574,57 +572,61 @@ void Graph::initialize() {
     /*
     // ==============================================================================================================
     // ***** Starting Cuda implementaton
+    // NOTE: variables beginning with "h_" denote those on host (cpu), variables beginning with "d_" denotes those on device (gpu)
     // Device initiation
     int dev = findCudaDevice(argc, (const char **)argv);
+
+    // Knowing number of piles makes our mallocs and memcpys easier
+    uint32_t num_piles = piles_.size();
 
     // LOAD OVERLAP_BEGINS AND OVERLAP_ENDS INTO GPU
 
     // Host memory allocation (all temp)
-    uint32_t *h_pile_begins     = new uint32_t[piles_.size()];
-    uint32_t *h_new_pile_begins = new uint32_t[piles_.size()];
-    uint32_t *h_pile_ends       = new uint32_t[piles_.size()];
-    uint32_t *h_new_pile_ends   = new uint32_t[piles_.size()];
-    bool *h_valid_regions       = new bool[piles_.size()];
-    // Fill pile begins and ends
-    for(int i = 0; i < piles_.size(); ++i) {
-        pile_dims[i].first  = piles_[i].begin();
-        pile_dims[i].second = piles_[i].end();
+    uint32_t *h_pile_begins     = new uint32_t[num_piles];
+    uint32_t *h_pile_ends       = new uint32_t[num_piles];
+    bool *h_valid_regions       = new bool[num_piles];
+    float *h_means              = new float[piles.size()];
+
+    // Fill pile begins and ends with current values
+    // For valid regions, these will change later
+    for(int i = 0; i < num_piles; ++i) {
+        pile_begins[i]  = piles_[i].begin();
+        pile_ends[i]    = piles_[i].end();
     }
-    // Knowing number of piles makes our mallocs and memcpys easier
-    uint32_t num_piles = piles_.size();
 
     cudaError_t status;
 
     // Allocate device memory. We have 5 mallocs here.
     uint32_t *d_overlap_begins, *d_overlap_ends;
-    uint32_t *d_pile_begins, *d_new_pile_begins, *d_pile_ends, *d_new_pile_ends;
+    uint32_t *d_pile_begins, *d_pile_ends;
     bool *d_valid_regions;
+    float *d_means;
 
-    // Allocate new_overlap_begins and new_overlap_ends
+    // Allocate memory on GPU
+    // Overlap begins/ends
     status = cudaMalloc( (void **)(&d_overlap_begins), overlap_begins_length*sizeof(ovlp) );
     checkCudaErrors( status );
     status = cudaMalloc( (void **)(&d_overlap_ends), overlap_ends_length*sizeof(ovlp) );
     checkCudaErrors( status );
-    // Allocate pile_dims and new_pile_dims
+    // Allocate pile_begins and pile_ends. Will be edited for valid regions within kernel
     status = cudaMalloc( (void **)(&d_pile_begins), num_piles*sizeof(uint32_t) );
-    checkCudaErrors( status );
-    status = cudaMalloc( (void **)(&d_new_pile_begins), num_piles*sizeof(uint32_t) );
     checkCudaErrors( status );
     status = cudaMalloc( (void **)(&d_pile_ends), num_piles*sizeof(uint32_t) );
     checkCudaErrors( status );
-    status = cudaMalloc( (void **)(&d_new_pile_ends), num_piles*sizeof(uint32_t) );
-    checkCudaErrors( status );
-    // Allocate valid_regions, which we'll write to with the kernel
+    // Allocate valid_regions (bool*) and means (float*).
+    // The former will determine which regions are valid, the latter returns calculated means for regions that are valid
     status = cudaMalloc( (void **)(&d_valid_regions), num_piles*sizeof(bool) );
     checkCudaErrors( status );
+    status = cudaMalloc( (void **)(&d_), num_piles*sizeof(bool) );
+    checkCudaErrors( status );
 
-    // Copy host memory to the device (ram to GPU memory). We have 3 memcpy's here
-    // Copy overlap data
+    // Copy host memory to the device (ram to GPU memory).
+    // Copy overlap begins/ends
     status = cudaMemcpy( d_overlap_begins, h_overlap_begins, overlap_begins_length*sizeof(ovlp), cudaMemcpyHostToDevice );
     checkCudaErrors( status );
     status = cudaMemcpy( d_overlap_ends, h_overlap_ends, overlap_ends_length*sizeof(ovlp), cudaMemcpyHostToDevice );
     checkCudaErrors( status );
-    // Copy pile begins and ends
+    // Copy pile begins/ends
     status = cudaMemcpy( d_pile_begins, h_pile_begins, num_piles*sizeof(uint32_t), cudaMemcpyHostToDevice );
     checkCudaErrors( status );
     status = cudaMemcpy( d_pile_ends, h_pile_ends, num_piles*sizeof(uint32_t), cudaMemcpyHostToDevice );
@@ -652,8 +654,10 @@ void Graph::initialize() {
     checkCudaErrors( status );
 
     // execute the kernel:
-    cuda_find_valid_region<<< grid, threads >>>(d_overlap_begins, d_overlap_ends, d_pile_begins, d_pile_ends,   // Given data
-                                                d_new_pile_begins, d_new_pile_ends, d_valid_regions) );         // Vectors to fill
+    // ***** NEED TO FIX THIS CALL
+    cuda_find_valid_region<<< grid, threads >>>(d_overlap_begins, d_overlap_ends,   
+                                                d_pile_begins, d_pile_ends,         // Given data, converted to new begins and ends
+                                                d_valid_regions, d_means) );        // Vectors to fill
 
     // record the stop event:
     status = cudaEventRecord( stop, NULL );
@@ -673,22 +677,15 @@ void Graph::initialize() {
 
     // copy result from the device to the host:
     // New pile begins and ends
-    status = cudaMemcpy( h_new_pile_begins, d_new_pile_begins, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
+    status = cudaMemcpy( h_pile_begins, d_pile_begins, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
     checkCudaErrors( status );
-    status = cudaMemcpy( h_new_pile_ends, d_new_pile_ends, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
+    status = cudaMemcpy( h_pile_ends, d_pile_ends, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
     checkCudaErrors( status );
     // Bool array of valid regions
     status = cudaMemcpy( h_valid_regions, d_valid_regions, num_piles*sizeof(bool), cudaMemcpyDeviceToHost );
     checkCudaErrors( status );
     cudaDeviceSynchronize( );
-
-    // Free up memory on GPU, but keep our overlap_begins and overlap_ends
-    // status = cudaFree( d_pile_begins );
-    // status = cudaFree( d_pile_ends );
-    status = cudaFree( d_new_pile_begins );
-    status = cudaFree( d_new_pile_ends );
-    status = cudaFree( d_valid_regions );
-
+    
     // Apply our new arrays to the data
     for(int i = 0; i < num_piles; ++i) {
         // If it has no valid regions, reset the vector
@@ -697,8 +694,8 @@ void Graph::initialize() {
         }
         else {
             // Otherwise set new begins and ends
-            piles_[i].begin_ = h_new_pile_begins[i];
-            piles_[i].ends_ = h_new_pile_ends[i];
+            piles_[i].begin_ = h_pile_begins[i];
+            piles_[i].ends_ = h_pile_ends[i];
         }
     }
 

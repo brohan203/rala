@@ -13,8 +13,10 @@
 
 namespace rala {
 
+// Subpile = doube ended queue
 using Subpile = std::deque<std::pair<int32_t, int32_t>>;
 
+// Remove back elements until value (second in pair) of last element < value of new pair 
 void subpileAdd(Subpile& src, int32_t value, int32_t position) {
     while (!src.empty() && src.back().second <= value) {
         src.pop_back();
@@ -22,6 +24,7 @@ void subpileAdd(Subpile& src, int32_t value, int32_t position) {
     src.emplace_back(position, value);
 }
 
+// Remove front elements until given position
 void subpileUpdate(Subpile& src, int32_t position) {
     while (!src.empty() && src.front().first <= position) {
         src.pop_front();
