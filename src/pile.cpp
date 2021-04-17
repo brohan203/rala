@@ -111,6 +111,59 @@ uint32_t Pile::find_histo_height(uint32_t location, std::vector<uint32_t> &overl
 
 // =============================================================================================
 
+// Generate minimizers to replace find_slopes
+// Adapted from https://arxiv.org/abs/1811.10074
+uint32_t Pile::generate_minimizers(double q, uint32_t k, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
+    // Keep track of last minimum and last position
+    uint32_t last_min_val  = 0;
+    uint64_t last_min_pos = 0;
+
+    // Allocate space for our sliding window, set it to all 0's
+    uint32_t* window = (uint32_t*)calloc(k, sizeof(uint32_t));
+    // Counters
+    uint32_t i = 0;
+    // Minimum counter
+    int minimum_counter = 0;
+    
+    // Fill the initial window array with heights
+    for (i = 0; i < k; i++) {
+        window[i] = find_histo_height(i, overlap_begins, overlap_ends);
+    }
+
+    // Iterate through array until end - k
+    for (i = 0; i < (end_ - begin_) - k; i++) {
+        // Update the sliding window
+        window[i % k] = find_histo_height(i, overlap_begins, overlap_ends);
+
+        // Set a new minimum to first element of window.
+        uint32_t min = window[0];
+
+        // Find the min in this particular sliding window
+        for (int j = 1; j < k; j++) {
+            // If this height is less than the saved minimum, set new minimum
+            if (window[j] < min)
+            {
+                min = window[j];
+            }
+        }
+
+        // If we have a new minimum value, OR we're in a completely new window, append to minimizers
+        if ((min != last_min_val) || (i - last_min_pos >= k))
+        {
+            slope_starts[minimum_counter] = min;
+            ++minimum_counter;
+            last_min_val  = min;
+            last_min_pos = i;
+        }
+    }
+
+    free(window);
+
+    return minimum_counter;
+}
+
+// =========================================================================================
+
 
 std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
@@ -145,6 +198,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vect
         subpileUpdate(right_subpile, i);
 
         int32_t current_value = find_histo_height(i, overlap_begins, overlap_ends) * q;
+        // Set last down if above a certain threshold
         if (i != 0 && left_subpile.front().second > current_value) {
             if (found_down) {
                 if (i - last_down > 1) {

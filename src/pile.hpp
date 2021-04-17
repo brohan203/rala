@@ -180,6 +180,8 @@ private:
 
     std::vector<std::pair<uint32_t, uint32_t>> find_slopes(double q, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
 
+    uint32_t generate_minimizers(double q, uint32_t k, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends);
+
     uint64_t id_;
     uint32_t begin_;
     uint32_t end_;
