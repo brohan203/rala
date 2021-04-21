@@ -48,11 +48,11 @@ __device__ uint32_t cuda_find_histo_height(uint32_t location, uint32_t *overlap_
 
 // Combination of find_valid_regions, find_mean (replacement for find_median), find_chimeric_hills, and find_chimeric_pits
 // ***** Currently only has find valid regions and find mean
-__global__ void cuda_fvr_mean_chimeric(uint32_t *overlap_begins,        // Overlap begins and ends
-                                       uint32_t *overlap_ends, 
-                                       uint32_t *pile_begins,           // Specific begins and ends of the piles
-                                       uint32_t *pile_ends, 
-                                       bool *valid_regions, float *means) // Bool vector for resetting piles
+__global__ void cuda_fvr_mean(uint32_t *overlap_begins,             // Overlap begins and ends
+                              uint32_t *overlap_ends, 
+                              uint32_t *pile_begins,                // Specific begins and ends of the piles
+                              uint32_t *pile_ends, 
+                              bool *valid_regions, float *means)    // Bool vector for resetting piles
 {
 
     // Figure out where we are. We will be using the "gid" position within all arrays
@@ -81,7 +81,7 @@ __global__ void cuda_fvr_mean_chimeric(uint32_t *overlap_begins,        // Overl
         }
     }
 
-    // If not a valid region, return (and skip mean + chimeric_hills + chimeric_pits)
+    // If not a valid region, return (and skip mean)
     if (pile_ends[gid] - pile_begins[gid] < 1260) {
         valid_regions[gid] = false;
         return;

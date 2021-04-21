@@ -118,34 +118,45 @@ uint32_t Pile::generate_minimizers(double q, uint32_t k, std::vector<uint32_t> &
     uint32_t last_min_val  = 0;
     uint64_t last_min_pos = 0;
 
+    std::vector<uint32_t> starts;
+    std::vector<uint32_t> ends;
+
     // Allocate space for our sliding window, set it to all 0's
     uint32_t* window = (uint32_t*)calloc(k, sizeof(uint32_t));
     // Counters
     uint32_t i = 0;
     // Minimum counter
     int minimum_counter = 0;
+    bool found = false;
+    uint32_t array_counter = 0;
     
     // Fill the initial window array with heights
     for (i = 0; i < k; i++) {
         window[i] = find_histo_height(i, overlap_begins, overlap_ends);
     }
 
-    // Iterate through array until end - k
-    for (i = 0; i < (end_ - begin_) - k; i++) {
+    // Iterate through array until length - k
+    for (i = 1; i < (end_ - begin_) - k; i++) {
         // Update the sliding window
         window[i % k] = find_histo_height(i, overlap_begins, overlap_ends);
 
         // Set a new minimum to first element of window.
         uint32_t min = window[0];
 
-        // Find the min in this particular sliding window
-        for (int j = 1; j < k; j++) {
-            // If this height is less than the saved minimum, set new minimum
-            if (window[j] < min)
-            {
-                min = window[j];
+        // Get value here
+        uint32_t current_value = find_histo_height(i, overlap_begins, overlap_ends);
+
+        for (int j = array_counter + 1; j != array_counter; j = (j + 1) % k) {
+            if (window[j] > current_value && found == false) {
+                starts.emplace_back(j);
+                found = true;
+            }
+            elif(window[j] < current_value && found == true) {
+                ends.emplace_back(j);
+                found = false;
             }
         }
+        ++array_counter;
 
         // If we have a new minimum value, OR we're in a completely new window, append to minimizers
         if ((min != last_min_val) || (i - last_min_pos >= k))
@@ -540,12 +551,14 @@ void Pile::find_chimeric_hills(std::vector<uint32_t> &overlap_begins, std::vecto
         const std::pair<uint32_t, uint32_t>& begin,
         const std::pair<uint32_t, uint32_t>& end) -> bool {
 
+        // If it's at the beginning or the end, return false
         if ((begin.first >> 1) < 0.05 * (this->end_ - this->begin_) + this->begin_ ||
             end.second > 0.95 * (this->end_ - this->begin_) + this->begin_ ||
             (end.first >> 1) - begin.second > 840) {
             return false;
         }
 
+        // 
         uint32_t peak_value = 1.3 * std::max(find_histo_height(begin.second, overlap_begins, overlap_ends),
                                              find_histo_height(end.first >> 1, overlap_begins, overlap_ends));
 

@@ -772,9 +772,11 @@ void Graph::construct(const std::string& sensitive_overlaps_path) {
             }
 
             if (piles_[it->a_id()]->has_chimeric_hill()) {
+                // Checks if chimeric hills are wighin this pile
                 piles_[it->a_id()]->check_chimeric_hills(it);
             }
             if (piles_[it->b_id()]->has_chimeric_hill()) {
+                // Checks if chimeric hills are wighin this pile
                 piles_[it->b_id()]->check_chimeric_hills(it);
             }
 
