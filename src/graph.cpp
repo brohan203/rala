@@ -32,10 +32,10 @@
 
 // CUDA runtime
 //#include <cuda_runtime.h>
-
 // Helper functions and utilities to work with CUDA
 #include "helper_functions.h"
 #include "helper_cuda.h"
+#include "functions.cuh"
 
 #include "sequence.hpp"
 #include "overlap.hpp"
@@ -535,29 +535,29 @@ void Graph::initialize() {
     (*logger_)("[rala::Graph::initialize] loaded overlaps");
     (*logger_)();
 
-    // Small for loop to check whether piles_.data() = find_histo_height = new_find_histo_height
-    printf("\nFirst elements of first pile:\n");
-    for(int a = 0; a < 30; a++) {
-        printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[0]->data()[a]
-                                                           ,piles_[0]->find_histo_height(a, overlap_begins, overlap_ends));
-    }
-    printf("\nSome elements of a middle pile:\n");
-    for(int a = 5000; a < 5030; a++) {
-        printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[129]->data()[a]
-                                                           ,piles_[129]->find_histo_height(a, overlap_begins, overlap_ends));
-    }
-    printf("\nLast elements of last pile:\n");
-    for(int a = 15030; a < piles_[18073]->data().size(); a++) {
-        printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[18073]->data()[a]
-                                                           ,piles_[18073]->find_histo_height(a, overlap_begins, overlap_ends));
-    }
+    // // Small for loop to check whether piles_.data() = find_histo_height = new_find_histo_height
+    // printf("\nFirst elements of first pile:\n");
+    // for(int a = 0; a < 30; a++) {
+    //     printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[0]->data()[a]
+    //                                                        ,piles_[0]->find_histo_height(a, overlap_begins, overlap_ends));
+    // }
+    // printf("\nSome elements of a middle pile:\n");
+    // for(int a = 5000; a < 5030; a++) {
+    //     printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[129]->data()[a]
+    //                                                        ,piles_[129]->find_histo_height(a, overlap_begins, overlap_ends));
+    // }
+    // printf("\nLast elements of last pile:\n");
+    // for(int a = 15030; a < piles_[18073]->data().size(); a++) {
+    //     printf("At position %d, Data_ = %d, FHH = %d\n", a, piles_[18073]->data()[a]
+    //                                                        ,piles_[18073]->find_histo_height(a, overlap_begins, overlap_ends));
+    // }
 
-    printf("\n\nDONE WITH PRINT, WAITING 3 SECONDS\n");
-    #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-    Sleep(3 * MILLISECOND);
-    #else
-    usleep(3 * MICROSECOND);
-    #endif
+    // printf("\n\nDONE WITH PRINT, WAITING 3 SECONDS\n");
+    // #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
+    // Sleep(3 * MILLISECOND);
+    // #else
+    // usleep(3 * MICROSECOND);
+    // #endif
 
 
     /* For each pile
@@ -569,138 +569,6 @@ void Graph::initialize() {
             }
     */
 
-    /*
-    // ==============================================================================================================
-    // ***** Starting Cuda implementaton
-    // NOTE: variables beginning with "h_" denote those on host (cpu), variables beginning with "d_" denotes those on device (gpu)
-    // Device initiation
-    int dev = findCudaDevice(argc, (const char **)argv);
-
-    // Knowing number of piles makes our mallocs and memcpys easier
-    uint32_t num_piles = piles_.size();
-
-    // LOAD OVERLAP_BEGINS AND OVERLAP_ENDS INTO GPU
-
-    // Host memory allocation (all temp)
-    uint32_t *h_pile_begins     = new uint32_t[num_piles];
-    uint32_t *h_pile_ends       = new uint32_t[num_piles];
-    bool *h_valid_regions       = new bool[num_piles];
-    float *h_means              = new float[piles.size()];
-
-    // Fill pile begins and ends with current values
-    // For valid regions, these will change later
-    for(int i = 0; i < num_piles; ++i) {
-        pile_begins[i]  = piles_[i].begin();
-        pile_ends[i]    = piles_[i].end();
-    }
-
-    cudaError_t status;
-
-    // Allocate device memory. We have 5 mallocs here.
-    uint32_t *d_overlap_begins, *d_overlap_ends;
-    uint32_t *d_pile_begins, *d_pile_ends;
-    bool *d_valid_regions;
-    float *d_means;
-
-    // Allocate memory on GPU
-    // Overlap begins/ends
-    status = cudaMalloc( (void **)(&d_overlap_begins), overlap_begins_length*sizeof(ovlp) );
-    checkCudaErrors( status );
-    status = cudaMalloc( (void **)(&d_overlap_ends), overlap_ends_length*sizeof(ovlp) );
-    checkCudaErrors( status );
-    // Allocate pile_begins and pile_ends. Will be edited for valid regions within kernel
-    status = cudaMalloc( (void **)(&d_pile_begins), num_piles*sizeof(uint32_t) );
-    checkCudaErrors( status );
-    status = cudaMalloc( (void **)(&d_pile_ends), num_piles*sizeof(uint32_t) );
-    checkCudaErrors( status );
-    // Allocate valid_regions (bool*) and means (float*).
-    // The former will determine which regions are valid, the latter returns calculated means for regions that are valid
-    status = cudaMalloc( (void **)(&d_valid_regions), num_piles*sizeof(bool) );
-    checkCudaErrors( status );
-    status = cudaMalloc( (void **)(&d_), num_piles*sizeof(bool) );
-    checkCudaErrors( status );
-
-    // Copy host memory to the device (ram to GPU memory).
-    // Copy overlap begins/ends
-    status = cudaMemcpy( d_overlap_begins, h_overlap_begins, overlap_begins_length*sizeof(ovlp), cudaMemcpyHostToDevice );
-    checkCudaErrors( status );
-    status = cudaMemcpy( d_overlap_ends, h_overlap_ends, overlap_ends_length*sizeof(ovlp), cudaMemcpyHostToDevice );
-    checkCudaErrors( status );
-    // Copy pile begins/ends
-    status = cudaMemcpy( d_pile_begins, h_pile_begins, num_piles*sizeof(uint32_t), cudaMemcpyHostToDevice );
-    checkCudaErrors( status );
-    status = cudaMemcpy( d_pile_ends, h_pile_ends, num_piles*sizeof(uint32_t), cudaMemcpyHostToDevice );
-    checkCudaErrors( status );
-
-    int blocksize = 32;
-    int numblocks = ceil(num_piles / blocksize);
-
-    // setup the execution parameters:
-    dim3 threads(blocksize, 1, 1 );
-    dim3 grid(numblocks, 1, 1 );
-
-    // create and start timer
-    cudaDeviceSynchronize( );
-
-    // allocate CUDA events that we'll use for timing:
-    cudaEvent_t start, stop;
-    status = cudaEventCreate( &start );
-    checkCudaErrors( status );
-    status = cudaEventCreate( &stop );
-    checkCudaErrors( status );
-
-    // record the start event:
-    status = cudaEventRecord( start, NULL );
-    checkCudaErrors( status );
-
-    // execute the kernel:
-    // ***** NEED TO FIX THIS CALL
-    cuda_find_valid_region<<< grid, threads >>>(d_overlap_begins, d_overlap_ends,   
-                                                d_pile_begins, d_pile_ends,         // Given data, converted to new begins and ends
-                                                d_valid_regions, d_means) );        // Vectors to fill
-
-    // record the stop event:
-    status = cudaEventRecord( stop, NULL );
-    checkCudaErrors( status );
-
-    // wait for the stop event to complete:
-    status = cudaEventSynchronize( stop );
-    checkCudaErrors( status );
-
-    float msecTotal = 0.0f;
-    status = cudaEventElapsedTime( &msecTotal, start, stop );
-    checkCudaErrors( status );
-
-    // compute and print the performance
-    double secondsTotal = 0.001 * (double)msecTotal;
-    double trialsPerSecond = (float)num_piles / secondsTotal;
-
-    // copy result from the device to the host:
-    // New pile begins and ends
-    status = cudaMemcpy( h_pile_begins, d_pile_begins, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
-    checkCudaErrors( status );
-    status = cudaMemcpy( h_pile_ends, d_pile_ends, num_piles*sizeof(uint32_t), cudaMemcpyDeviceToHost );
-    checkCudaErrors( status );
-    // Bool array of valid regions
-    status = cudaMemcpy( h_valid_regions, d_valid_regions, num_piles*sizeof(bool), cudaMemcpyDeviceToHost );
-    checkCudaErrors( status );
-    cudaDeviceSynchronize( );
-    
-    // Apply our new arrays to the data
-    for(int i = 0; i < num_piles; ++i) {
-        // If it has no valid regions, reset the vector
-        if(!h_valid_regions[i]) {
-            piles_[i].reset();
-        }
-        else {
-            // Otherwise set new begins and ends
-            piles_[i].begin_ = h_pile_begins[i];
-            piles_[i].ends_ = h_pile_ends[i];
-        }
-    }
-
-    // ==============================================================================================================
-    */
     std::vector<std::future<void>> thread_futures;
     for (const auto& it: piles_) {
         if (it == nullptr) {

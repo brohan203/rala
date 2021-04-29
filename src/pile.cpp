@@ -10,6 +10,7 @@
 
 #include "overlap.hpp"
 #include "pile.hpp"
+#include "functions.cuh"
 
 namespace rala {
 
@@ -109,72 +110,344 @@ uint32_t Pile::find_histo_height(uint32_t location, std::vector<uint32_t> &overl
              upper_bound(overlap_ends, 0, overlap_ends.size()-1, thisLocation    ) );
 }
 
-// =============================================================================================
+// =========================================================================================
 
-// Generate minimizers to replace find_slopes
-// Adapted from https://arxiv.org/abs/1811.10074
-uint32_t Pile::generate_minimizers(double q, uint32_t k, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
-    // Keep track of last minimum and last position
-    uint32_t last_min_val  = 0;
-    uint64_t last_min_pos = 0;
+// NOTES:
+// We have left and right subpiles. Subpiles are just sliding windows.
+// The two subpiles are nearly adjacent
+    // left spans from (i - k) to (i - 1)
+    // right spans from (i + 1) to (i + k)
+    // i is between them but contained in neither
+// Always check i vs max( (i+1) to (i+k) ) and max( (i-k) to (i-1))
+std::vector<std::pair<uint32_t, uint32_t>> Pile::brute_find_slopes(double q, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
-    std::vector<uint32_t> starts;
-    std::vector<uint32_t> ends;
+    std::vector<std::pair<uint32_t, uint32_t>> slope_regions;
 
-    // Allocate space for our sliding window, set it to all 0's
-    uint32_t* window = (uint32_t*)calloc(k, sizeof(uint32_t));
-    // Counters
-    uint32_t i = 0;
-    // Minimum counter
-    int minimum_counter = 0;
-    bool found = false;
-    uint32_t array_counter = 0;
-    
-    // Fill the initial window array with heights
-    for (i = 0; i < k; i++) {
-        window[i] = find_histo_height(i, overlap_begins, overlap_ends);
+    int32_t k = 847;
+    int32_t read_length = end_ - begin_;
+
+    // Trying to replace slope_regions with an array
+    uint32_t slope_region_begins[k];
+    memset( slope_region_begins, 0, k*sizeof(uint32_t));
+    uint32_t slope_region_ends[k];
+    memset( slope_region_begins, 0, k*sizeof(uint32_t));
+    uint32_t slope_regions_counter = 0;
+
+    // Turned subpiles into arrays
+    // Down corresponds to left subpile
+    uint32_t left_subpile[k];
+    memset( left_subpile, 0, k*sizeof(uint32_t));
+    uint32_t first_down = 0, last_down = 0;
+    bool found_down = false;
+
+    // Up corresponds to right subpile
+    uint32_t right_subpile[k];
+    memset( right_subpile, 0, k*sizeof(uint32_t));
+    uint32_t first_up = 0, last_up = 0;
+    bool found_up = false;
+
+    // Initialize right subpile with first k elements
+    for (int32_t i = 0; i < k; ++i) {
+        right_subpile[i] = find_histo_height(i, overlap_begins, overlap_ends);
     }
 
-    // Iterate through array until length - k
-    for (i = 1; i < (end_ - begin_) - k; i++) {
-        // Update the sliding window
-        window[i % k] = find_histo_height(i, overlap_begins, overlap_ends);
+    // I believe this will eventually be parallelized
+    for (int32_t i = 0; i < read_length; ++i) {
 
-        // Set a new minimum to first element of window.
-        uint32_t min = window[0];
+        // Last position in the array
+        uint32_t subpile_end   = i % k;
+        // First position in the array
+        uint32_t subpile_begin = (i+1) % k;
 
-        // Get value here
-        uint32_t current_value = find_histo_height(i, overlap_begins, overlap_ends);
+        // Update left and right subpiles
+        // This keeps left subpile from (i - k - 1) to (i - 1)
+        if (i > 0) {
+            // Old line = subpileAdd(left_subpile, data_[i - 1], i - 1);
+            left_subpile[subpile_end] = find_histo_height(i - 1, overlap_begins, overlap_ends);
+        }
+        // Last element of left subpile is i+k
+        // This keeps right subpile from (i + 1) to (i + k)
+        if (i < read_length - k) {
+            // Old line = subpileAdd(right_subpile, data_[i + k], i + k);
+            right_subpile[subpile_end] = find_histo_height(i + k, overlap_begins, overlap_ends);
+        }
 
-        for (int j = array_counter + 1; j != array_counter; j = (j + 1) % k) {
-            if (window[j] > current_value && found == false) {
-                starts.emplace_back(j);
-                found = true;
+        uint32_t left_max  = 0;
+        uint32_t right_max = 0;
+        for(int x = 0; x < k; ++x) {
+            if(left_subpile[x] > left_max) {
+                left_max = left_subpile[x];
             }
-            elif(window[j] < current_value && found == true) {
-                ends.emplace_back(j);
-                found = false;
+            if(right_subpile[x] > right_max) {
+                right_max = right_subpile[x];
             }
         }
-        ++array_counter;
 
-        // If we have a new minimum value, OR we're in a completely new window, append to minimizers
-        if ((min != last_min_val) || (i - last_min_pos >= k))
+
+        // Old line = int32_t current_value = data_[i] * q;
+        int32_t current_value = find_histo_height(i, overlap_begins, overlap_ends) * q;
+
+        // If first element of left subpile > (current_value * q)
+        if (i != 0 && left_subpile[subpile_begin] > current_value) {
+            if (found_down) {
+                if (i - last_down > 1) {
+                    slope_regions.emplace_back(first_down, last_down);
+                    slope_region_begins[slope_regions_counter] = first_down;
+                    slope_region_ends[slope_regions_counter]   = last_down;
+                    ++slope_regions_counter;
+                    first_down = i;
+                }
+            } else {
+                found_down = true;
+                first_down = i;
+            }
+            last_down = i;
+        }
+        if (i != (read_length - 1) && right_subpile[subpile_begin] > current_value) {
+            if (found_up) {
+                if (i - last_up > 1) {
+                    slope_regions.emplace_back(first_up, last_up);
+                    slope_region_begins[slope_regions_counter] = first_up;
+                    slope_region_ends[slope_regions_counter]   = last_up;
+                    ++slope_regions_counter;
+                    first_up = i;
+                }
+            } else {
+                found_up = true;
+                first_up = i;
+            }
+            last_up = i;
+        }
+    }
+    if (found_down) {
+        slope_regions.emplace_back(first_down, last_down);
+        slope_region_begins[slope_regions_counter] = first_down;
+        slope_region_ends[slope_regions_counter]   = last_down;
+        ++slope_regions_counter;
+    }
+    if (found_up) {
+        slope_regions.emplace_back(first_up, last_up);
+        slope_region_begins[slope_regions_counter] = first_up;
+        slope_region_ends[slope_regions_counter]   = last_up;
+        ++slope_regions_counter;
+    }
+
+    if(slope_regions_counter < 2) {
+        return slope_regions;
+    }
+
+    printf("239\n");
+    uint32_t iterations = 0
+
+    while (true) {
+        // Implementation of insertion sort for our slope_region_begins/ends arrays
+        // Sorts based on slope_region_begins
+        int i, key_begins, key_ends, j;
+        for (i = 1; i < slope_regions_counter; i++)
         {
-            slope_starts[minimum_counter] = min;
-            ++minimum_counter;
-            last_min_val  = min;
-            last_min_pos = i;
+            key_begins = slope_region_begins[i];
+            key_ends = slope_region_ends[i];
+            j = i - 1;
+    
+            /* Move elements of arr[0..i-1], that are
+            greater than key, to one position ahead
+            of their current position */
+            while (j >= 0 && slope_region_begins[j] > key_begins)
+            {
+                slope_region_begins[j + 1] = slope_region_begins[j];
+                slope_region_ends[j + 1] = slope_region_ends[j];
+                j = j - 1;
+            }
+            slope_region_begins[j + 1] = key_begins;
+            slope_region_ends[j + 1] = key_ends;
+        }
+
+        bool is_changed = false;
+        for (uint32_t i = 0; i < slope_regions_counter; ++i) {
+            if (slope_region_ends[i] < (slope_region_ends[i + 1])) {
+                continue;
+            }
+
+            std::vector<std::pair<uint32_t, uint32_t>> subregions;
+            uint32_t subregion_begins[k];
+            memset( subregion_begins, 0, k*sizeof(uint32_t) );
+            uint32_t subregion_ends[k];
+            memset( subregion_ends, 0, k*sizeof(uint32_t) );
+            uint32_t subregions_counter = 0;
+            if (slope_region_begins[i] & 1) {
+                // STUCK HERE
+
+                // Clear right subpile
+                for(int x = 0; x < k; ++x) {
+                    right_subpile[x] = 0;
+                }
+
+                found_up = false;
+                uint32_t subpile_begin = slope_region_begins[i];
+                uint32_t subpile_end;
+                if(slope_region_ends[i+1] > 0) {
+                    subpile_end = std::min(slope_region_ends[i], slope_region_ends[i + 1]);
+                }
+                else {
+                    subpile_end = slope_region_ends[i];
+                }
+
+                for (uint32_t j = subpile_begin; j < subpile_end + 1; ++j) {
+                    right_subpile[j - subpile_begin] = find_histo_height(j, overlap_begins, overlap_ends);
+                }
+                for (uint32_t j = subpile_begin; j < subpile_end; ++j) {
+
+                    uint32_t max = 0;
+                    for(int x = 0; x < k; ++x) {
+                        if(right_subpile[x] > max) {
+                            max = right_subpile[x];
+                        }
+                    }
+                    if (find_histo_height(j, overlap_begins, overlap_ends) * q < max) {
+                        if (found_up) {
+                            if (j - last_up > 1) {
+                                subregion_begins[subregions_counter] = first_up;
+                                subregion_ends[subregions_counter]   = last_up;
+                                ++subregions_counter;
+                                first_up = j;
+                            }
+                        } else {
+                            found_up = true;
+                            first_up = j;
+                        }
+                        last_up = j;
+                    }
+                    right_subpile[(j - subpile_begin) % k] = find_histo_height(j, overlap_begins, overlap_ends);
+                }
+                if (found_up) {
+                    subregion_begins[subregions_counter] = first_up;
+                    subregion_ends[subregions_counter]   = last_up;
+                    ++subregions_counter;
+                }
+
+                for(int x = 0; x < subregions_counter; ++x) {
+                    slope_regions.emplace_back(subregion_begins[x], subregion_ends[x]);
+                    slope_region_begins[slope_regions_counter] = subregion_begins[x];
+                    slope_region_ends[slope_regions_counter]   = subregion_ends[x];
+                    ++slope_regions_counter;
+                }
+                slope_region_begins[i] = subpile_end << 1 | 1;
+
+            } else {
+                if (slope_region_ends[i] == (slope_region_begins[i + 1])) {
+                    continue;
+                }
+
+                uint32_t else_subregion_counter = subregions_counter;
+
+                // Clear left subpile
+                for(int x = 0; x < k; ++x) {
+                    left_subpile[x] = 0;
+                }
+                found_down = false;
+
+                uint32_t subpile_begin = std::max(slope_region_begins[i],
+                    slope_region_begins[i + 1]);
+                uint32_t subpile_end = slope_region_ends[i];
+
+                // Rebuild left subpile from this specific begin to end
+                for (uint32_t j = subpile_begin; j < subpile_end + 1; ++j) {
+                    left_subpile[j - subpile_begin] = find_histo_height(j, overlap_begins, overlap_ends);
+                }
+
+                for (uint32_t j = subpile_begin; j < subpile_end + 1; ++j) {
+                    // Find the max of the left subpile
+                    uint32_t max = 0;
+                    for(int x = 0; x < k; ++x) {
+                        if(left_subpile[x] > max) {
+                            max = left_subpile[x];
+                        }
+                    }
+                    if (find_histo_height(j, overlap_begins, overlap_ends) * q < max) {
+                        if (found_down) {
+                            if (j - last_down > 1) {
+                                subregion_begins[subregions_counter] = first_down;
+                                subregion_ends[subregions_counter]   = last_down;
+                                ++subregions_counter;
+                                first_down = j;
+                            }
+                        } else {
+                            found_down = true;
+                            first_down = j;
+                        }
+                        last_down = j;
+                    }
+                    left_subpile[(j - subpile_begin) % k] = find_histo_height(j, overlap_begins, overlap_ends);
+                }
+                if (found_down) {
+                    subregion_begins[subregions_counter] = first_down;
+                    subregion_ends[subregions_counter]   = last_down;
+                    ++subregions_counter;
+                }
+
+                for(int x = else_subregion_counter; x < subregions_counter; ++x) {
+                    slope_regions.emplace_back(subregion_begins[x], subregion_ends[x]);
+                    slope_region_begins[slope_regions_counter] = subregion_begins[x];
+                    slope_region_ends[slope_regions_counter]   = subregion_ends[x];
+                    ++slope_regions_counter;
+                }
+
+                slope_region_ends[i] = subpile_begin;
+            }
+
+            is_changed = true;
+            break;
+        }
+
+        if (!is_changed) {
+            break;
         }
     }
 
-    free(window);
+    printf("386 brute_slopes at a pile\n");
 
-    return minimum_counter;
+    // narrow slope regions
+    for (uint32_t i = 0; i < slope_regions_counter - 1; ++i) {
+        if ((slope_region_begins[i] & 1) && !(slope_region_begins[i + 1] & 1)) {
+
+            uint32_t subpile_begin = slope_region_ends[i];
+            uint32_t subpile_end = slope_region_begins[i + 1];
+
+            if (subpile_end - subpile_begin > static_cast<uint32_t>(k)) {
+                continue;
+            }
+
+            uint16_t max_subpile_coverage = 0;
+            for (uint32_t j = subpile_begin + 1; j < subpile_end; ++j) {
+                if((uint16_t)find_histo_height(j, overlap_begins, overlap_ends) > max_subpile_coverage) {
+                    max_subpile_coverage = (uint16_t)find_histo_height(j, overlap_begins, overlap_ends);
+                }
+            }
+
+            uint32_t last_valid_point = slope_region_begins[i];
+            for (uint32_t j = slope_region_begins[i]; j <= subpile_begin; ++j) {
+                if (max_subpile_coverage > find_histo_height(j, overlap_begins, overlap_ends) * q) {
+                    last_valid_point = j;
+                }
+            }
+
+            uint32_t first_valid_point = slope_region_ends[i + 1];
+            for (uint32_t j = subpile_end; j <= slope_region_ends[i + 1]; ++j) {
+                if (max_subpile_coverage > find_histo_height(j, overlap_begins, overlap_ends) * q) {
+                    first_valid_point = j;
+                    break;
+                }
+            }
+
+            slope_region_ends[i] = last_valid_point;
+            slope_region_begins[i + 1] = first_valid_point << 1 | 0;
+        }
+    }
+
+    return slope_regions;
 }
 
 // =========================================================================================
-
 
 std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
@@ -246,6 +519,10 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vect
         return slope_regions;
     }
 
+    if(slope_regions.size() > k) {
+        printf("Slope regions larger than k: %d\n", (slope_regions.size()));
+    }
+
     while (true) {
         std::sort(slope_regions.begin(), slope_regions.end());
 
@@ -256,6 +533,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vect
             }
 
             std::vector<std::pair<uint32_t, uint32_t>> subregions;
+            // ===================================================
             if (slope_regions[i].first & 1) {
                 right_subpile.clear();
                 found_up = false;
@@ -290,7 +568,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vect
                     slope_regions.emplace_back(it.first << 1 | 1, it.second);
                 }
                 slope_regions[i].first = subpile_end << 1 | 1;
-
+            // ===================================================
             } else {
                 if (slope_regions[i].second == (slope_regions[i + 1].first >> 1)) {
                     continue;
@@ -327,6 +605,7 @@ std::vector<std::pair<uint32_t, uint32_t>> Pile::find_slopes(double q, std::vect
                 }
                 slope_regions[i].second = subpile_begin;
             }
+            // ===================================================
 
             is_changed = true;
             break;
@@ -542,7 +821,7 @@ bool Pile::break_over_chimeric_pits(uint16_t dataset_median) {
 
 void Pile::find_chimeric_hills(std::vector<uint32_t> &overlap_begins, std::vector<uint32_t> &overlap_ends) {
 
-    auto slope_regions = find_slopes(1.3, overlap_begins, overlap_ends);
+    auto slope_regions = brute_find_slopes(1.3, overlap_begins, overlap_ends);
     if (slope_regions.empty()) {
         return;
     }
