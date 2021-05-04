@@ -558,16 +558,33 @@ void Graph::initialize() {
     // #else
     // usleep(3 * MICROSECOND);
     // #endif
+    // ==================================
+
+    // Starting cuda calls
+    
+    // Allocate host memory
+    // Allocate device memory. We have 5 mallocs here.
+    // overlap begins/ends, and pile begins/ends are pre-allocated
+    uint32_t *h_overlap_begins, *h_overlap_ends;
+    std::copy(overlap_begins.begin(), overlap_begins.end(), h_overlap_begins);
+    std::copy(overlap_ends.begin(), overlap_ends.end(), h_overlap_ends);
+    uint32_t *h_pile_begins, *h_pile_ends;
+    memset(h_pile_begins, 0, piles_.size()*sizeof(uint32_t));
+    memset(h_pile_ends, 0, piles_.size()*sizeof(uint32_t));
+    for(int i = 0; i < piles_.size(); ++i) {
+        h_pile_begins[i] = piles_[i]->begin();
+        h_pile_ends[i]   = piles_[i]->end();
+    }
+    bool *h_valid_regions;
+    memset(h_valid_regions, 0, piles_.size()*sizeof(bool));
+    float *h_means;
+    memset(h_means, 0, piles_.size()*sizeof(uint32_t));
 
 
-    /* For each pile
-            if(find_valid_region) -> reset
-            else{
-                find median
-                find chimeric hills
-                find chimeric pits
-            }
-    */
+
+    CudaRalaFunctions::fvr_mean(h_overlap_begins, h_overlap_ends
+                                h_pile_begins,    h_pile_ends,
+                                h_valid_regions,  h_means);
 
     std::vector<std::future<void>> thread_futures;
     for (const auto& it: piles_) {

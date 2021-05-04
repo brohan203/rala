@@ -112,7 +112,6 @@ __global__ void cuda_fvr_mean(uint32_t *overlap_begins,             // Overlap b
 
 
 // NOTE: variables beginning with "h_" denote those on host (cpu), variables beginning with "d_" denotes those on device (gpu)
-
 namespace CudaRalaFunctions {
     void fvr_mean(uint32_t *h_overlap_begins, uint32_t *h_overlap_ends,       // Overlap begins and ends
                   uint32_t *h_pile_begins,    uint32_t *h_pile_ends,          // Pile begins and ends
