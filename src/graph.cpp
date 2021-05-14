@@ -563,28 +563,28 @@ void Graph::initialize() {
     // Starting cuda calls
     
     // Allocate host memory
-    // Allocate device memory. We have 5 mallocs here.
     // overlap begins/ends, and pile begins/ends are pre-allocated
-    uint32_t *h_overlap_begins, *h_overlap_ends;
+    uint32_t h_overlap_begins [overlap_begins.size()];
+    uint32_t h_overlap_ends   [overlap_begins.size()];
     std::copy(overlap_begins.begin(), overlap_begins.end(), h_overlap_begins);
     std::copy(overlap_ends.begin(), overlap_ends.end(), h_overlap_ends);
-    uint32_t *h_pile_begins, *h_pile_ends;
+    uint32_t h_pile_begins [piles_.size()];
+    uint32_t h_pile_ends   [piles_.size()];
     memset(h_pile_begins, 0, piles_.size()*sizeof(uint32_t));
     memset(h_pile_ends, 0, piles_.size()*sizeof(uint32_t));
     for(int i = 0; i < piles_.size(); ++i) {
         h_pile_begins[i] = piles_[i]->begin();
         h_pile_ends[i]   = piles_[i]->end();
     }
-    bool *h_valid_regions;
+    bool h_valid_regions [piles_.size()];
     memset(h_valid_regions, 0, piles_.size()*sizeof(bool));
-    float *h_means;
+    float h_means        [piles_.size()];
     memset(h_means, 0, piles_.size()*sizeof(uint32_t));
 
 
-
-    CudaRalaFunctions::fvr_mean(h_overlap_begins, h_overlap_ends
-                                h_pile_begins,    h_pile_ends,
-                                h_valid_regions,  h_means);
+    // CudaRalaFunctions::fvr_mean(h_overlap_begins, h_overlap_ends
+    //                             h_pile_begins,    h_pile_ends,
+    //                             h_valid_regions,  h_means);
 
     std::vector<std::future<void>> thread_futures;
     for (const auto& it: piles_) {
